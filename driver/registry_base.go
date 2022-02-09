@@ -219,7 +219,7 @@ func (m *RegistryBase) HealthHandler() *healthx.Handler {
 			"database": func(_ *http.Request) error {
 				return m.r.Ping()
 			},
-			"migrations": func(r *http.Request) error {
+			/*"migrations": func(r *http.Request) error {
 				status, err := m.r.Persister().MigrationStatus(r.Context())
 				if err != nil {
 					return err
@@ -232,7 +232,7 @@ func (m *RegistryBase) HealthHandler() *healthx.Handler {
 				}
 
 				return nil
-			},
+			},*/
 		})
 	}
 
