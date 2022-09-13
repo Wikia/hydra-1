@@ -10,6 +10,7 @@ COPY internal/httpclient/go.* ./internal/httpclient
 
 ENV GO111MODULE on
 ENV CGO_ENABLED 1
+ENV GOFLAGS -buildvcs=false
 
 RUN go mod download
 
