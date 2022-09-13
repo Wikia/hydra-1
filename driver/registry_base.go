@@ -3,8 +3,6 @@ package driver
 import (
 	"context"
 	"crypto/sha256"
-	"fmt"
-	"net"
 	"net/http"
 	"time"
 
@@ -24,8 +22,6 @@ import (
 	"github.com/ory/hydra/hsm"
 
 	prometheus "github.com/ory/x/prometheusx"
-
-	"github.com/pkg/errors"
 
 	"github.com/ory/hydra/oauth2/trust"
 	"github.com/ory/hydra/x/oauth2cors"
