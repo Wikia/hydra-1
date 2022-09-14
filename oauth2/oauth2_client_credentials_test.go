@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -36,37 +37,43 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 
 	"github.com/ory/hydra/internal/testhelpers"
+	"github.com/ory/x/contextx"
 
 	hc "github.com/ory/hydra/client"
 	"github.com/ory/hydra/driver/config"
 	"github.com/ory/hydra/internal"
 	"github.com/ory/hydra/x"
+	"github.com/ory/x/requirex"
 )
 
 func TestClientCredentials(t *testing.T) {
-	reg := internal.NewMockedRegistry(t)
-	reg.Config().MustSet(config.KeyAccessTokenStrategy, "opaque")
-	public, admin := testhelpers.NewOAuth2Server(t, reg)
+	ctx := context.Background()
+	reg := internal.NewMockedRegistry(t, &contextx.Default{})
+	reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, "opaque")
+	public, admin := testhelpers.NewOAuth2Server(ctx, t, reg)
+
+	var newCustomClient = func(t *testing.T, c *hc.Client) (*hc.Client, clientcredentials.Config) {
+		unhashedSecret := c.Secret
+		require.NoError(t, reg.ClientManager().CreateClient(ctx, c))
+		return c, clientcredentials.Config{
+			ClientID:       c.GetID(),
+			ClientSecret:   unhashedSecret,
+			TokenURL:       reg.Config().OAuth2TokenURL(ctx).String(),
+			Scopes:         strings.Split(c.Scope, " "),
+			EndpointParams: url.Values{"audience": c.Audience},
+		}
+	}
 
 	var newClient = func(t *testing.T) (*hc.Client, clientcredentials.Config) {
-		secret := uuid.New().String()
-		c := &hc.Client{
-			OutfacingID:   uuid.New().String(),
-			Secret:        secret,
+		cc, config := newCustomClient(t, &hc.Client{
+			Secret:        uuid.New().String(),
 			RedirectURIs:  []string{public.URL + "/callback"},
 			ResponseTypes: []string{"token"},
 			GrantTypes:    []string{"client_credentials"},
 			Scope:         "foobar",
 			Audience:      []string{"https://api.ory.sh/"},
-		}
-		require.NoError(t, reg.ClientManager().CreateClient(context.TODO(), c))
-		return c, clientcredentials.Config{
-			ClientID:       c.OutfacingID,
-			ClientSecret:   secret,
-			TokenURL:       reg.Config().OAuth2TokenURL().String(),
-			Scopes:         strings.Split(c.Scope, " "),
-			EndpointParams: url.Values{"audience": c.Audience},
-		}
+		})
+		return cc, config
 	}
 
 	var getToken = func(t *testing.T, conf clientcredentials.Config) (*goauth2.Token, error) {
@@ -84,16 +91,16 @@ func TestClientCredentials(t *testing.T) {
 		return string(out)
 	}
 
-	var inspectToken = func(t *testing.T, token *goauth2.Token, cl *hc.Client, conf clientcredentials.Config, strategy string) {
-		introspection := testhelpers.IntrospectToken(t, &goauth2.Config{ClientID: cl.OutfacingID, ClientSecret: conf.ClientSecret}, token, admin)
+	var inspectToken = func(t *testing.T, token *goauth2.Token, cl *hc.Client, conf clientcredentials.Config, strategy string, expectedExp time.Time) {
+		introspection := testhelpers.IntrospectToken(t, &goauth2.Config{ClientID: cl.GetID(), ClientSecret: conf.ClientSecret}, token.AccessToken, admin)
 
 		check := func(res gjson.Result) {
-			assert.EqualValues(t, cl.OutfacingID, res.Get("client_id").String(), "%s", res.Raw)
-			assert.EqualValues(t, cl.OutfacingID, res.Get("sub").String(), "%s", res.Raw)
-			assert.EqualValues(t, reg.Config().IssuerURL().String(), res.Get("iss").String(), "%s", res.Raw)
+			assert.EqualValues(t, cl.GetID(), res.Get("client_id").String(), "%s", res.Raw)
+			assert.EqualValues(t, cl.GetID(), res.Get("sub").String(), "%s", res.Raw)
+			assert.EqualValues(t, reg.Config().IssuerURL(ctx).String(), res.Get("iss").String(), "%s", res.Raw)
 
 			assert.EqualValues(t, res.Get("nbf").Int(), res.Get("iat").Int(), "%s", res.Raw)
-			assert.True(t, res.Get("exp").Int() >= res.Get("iat").Int()+int64(reg.Config().AccessTokenLifespan().Seconds()), "%s", res.Raw)
+			requirex.EqualTime(t, expectedExp, time.Unix(res.Get("exp").Int(), 0), time.Second)
 
 			assert.EqualValues(t, encodeOr(t, conf.EndpointParams["audience"], "[]"), res.Get("aud").Raw, "%s", res.Raw)
 		}
@@ -117,10 +124,10 @@ func TestClientCredentials(t *testing.T) {
 		check(jwtClaims)
 	}
 
-	var getAndInspectToken = func(t *testing.T, cl *hc.Client, conf clientcredentials.Config, strategy string) {
+	var getAndInspectToken = func(t *testing.T, cl *hc.Client, conf clientcredentials.Config, strategy string, expectedExp time.Time) {
 		token, err := getToken(t, conf)
 		require.NoError(t, err)
-		inspectToken(t, token, cl, conf, strategy)
+		inspectToken(t, token, cl, conf, strategy, expectedExp)
 	}
 
 	t.Run("case=should fail because audience is not allowed", func(t *testing.T) {
@@ -140,10 +147,10 @@ func TestClientCredentials(t *testing.T) {
 	t.Run("case=should pass with audience", func(t *testing.T) {
 		run := func(strategy string) func(t *testing.T) {
 			return func(t *testing.T) {
-				reg.Config().MustSet(config.KeyAccessTokenStrategy, strategy)
+				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
 
 				cl, conf := newClient(t)
-				getAndInspectToken(t, cl, conf, strategy)
+				getAndInspectToken(t, cl, conf, strategy, time.Now().Add(reg.Config().GetAccessTokenLifespan(ctx)))
 			}
 		}
 
@@ -154,11 +161,11 @@ func TestClientCredentials(t *testing.T) {
 	t.Run("case=should pass without audience", func(t *testing.T) {
 		run := func(strategy string) func(t *testing.T) {
 			return func(t *testing.T) {
-				reg.Config().MustSet(config.KeyAccessTokenStrategy, strategy)
+				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
 
 				cl, conf := newClient(t)
 				conf.EndpointParams = url.Values{}
-				getAndInspectToken(t, cl, conf, strategy)
+				getAndInspectToken(t, cl, conf, strategy, time.Now().Add(reg.Config().GetAccessTokenLifespan(ctx)))
 			}
 		}
 
@@ -169,11 +176,11 @@ func TestClientCredentials(t *testing.T) {
 	t.Run("case=should pass without scope", func(t *testing.T) {
 		run := func(strategy string) func(t *testing.T) {
 			return func(t *testing.T) {
-				reg.Config().MustSet(config.KeyAccessTokenStrategy, strategy)
+				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
 
 				cl, conf := newClient(t)
 				conf.Scopes = []string{}
-				getAndInspectToken(t, cl, conf, strategy)
+				getAndInspectToken(t, cl, conf, strategy, time.Now().Add(reg.Config().GetAccessTokenLifespan(ctx)))
 			}
 		}
 
@@ -182,11 +189,11 @@ func TestClientCredentials(t *testing.T) {
 	})
 
 	t.Run("case=should grant default scopes if configured to do ", func(t *testing.T) {
-		reg.Config().MustSet(config.KeyGrantAllClientCredentialsScopesPerDefault, true)
+		reg.Config().MustSet(ctx, config.KeyGrantAllClientCredentialsScopesPerDefault, true)
 
 		run := func(strategy string) func(t *testing.T) {
 			return func(t *testing.T) {
-				reg.Config().MustSet(config.KeyAccessTokenStrategy, strategy)
+				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
 
 				cl, conf := newClient(t)
 				defaultScope := conf.Scopes
@@ -197,7 +204,53 @@ func TestClientCredentials(t *testing.T) {
 
 				// We reset this so that introspectToken is going to check for the default scope.
 				conf.Scopes = defaultScope
-				inspectToken(t, token, cl, conf, strategy)
+				inspectToken(t, token, cl, conf, strategy, time.Now().Add(reg.Config().GetAccessTokenLifespan(ctx)))
+			}
+		}
+
+		t.Run("strategy=opaque", run("opaque"))
+		t.Run("strategy=jwt", run("jwt"))
+	})
+
+	t.Run("case=should pass with custom client access token lifespan", func(t *testing.T) {
+		run := func(strategy string) func(t *testing.T) {
+			return func(t *testing.T) {
+				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
+
+				secret := uuid.New().String()
+				cl, conf := newCustomClient(t, &hc.Client{
+					Secret:        secret,
+					RedirectURIs:  []string{public.URL + "/callback"},
+					ResponseTypes: []string{"token"},
+					GrantTypes:    []string{"client_credentials"},
+					Scope:         "foobar",
+					Audience:      []string{"https://api.ory.sh/"},
+				})
+				testhelpers.UpdateClientTokenLifespans(t, &goauth2.Config{ClientID: cl.GetID(), ClientSecret: conf.ClientSecret}, cl.GetID(), testhelpers.TestLifespans, admin)
+				getAndInspectToken(t, cl, conf, strategy, time.Now().Add(testhelpers.TestLifespans.ClientCredentialsGrantAccessTokenLifespan.Duration))
+			}
+		}
+
+		t.Run("strategy=opaque", run("opaque"))
+		t.Run("strategy=jwt", run("jwt"))
+	})
+
+	t.Run("case=should respect TTL", func(t *testing.T) {
+		duration := time.Hour * 24 * 7
+		reg.Config().MustSet(ctx, config.KeyAccessTokenLifespan, duration.String())
+
+		run := func(strategy string) func(t *testing.T) {
+			return func(t *testing.T) {
+				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
+				cl, conf := newClient(t)
+				conf.Scopes = []string{}
+				token, err := getToken(t, conf)
+				require.NoError(t, err)
+
+				assert.EqualValues(t, time.Now().Add(duration).Round(time.Minute), token.Expiry.Round(time.Minute))
+
+				introspection := testhelpers.IntrospectToken(t, &goauth2.Config{ClientID: cl.GetID(), ClientSecret: conf.ClientSecret}, token.AccessToken, admin)
+				assert.EqualValues(t, time.Now().Add(duration).Round(time.Minute), time.Unix(introspection.Get("exp").Int(), 0).Round(time.Minute))
 			}
 		}
 

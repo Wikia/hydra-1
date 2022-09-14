@@ -138,7 +138,7 @@ serve:
       debug: true
 
     # Access Log configuration for public server.
-    access_log:
+    request_log:
       # Disable access log for health endpoints.
       disable_for_health: false
 
@@ -198,7 +198,7 @@ serve:
       debug: true
 
     # Access Log configuration for admin server.
-    access_log:
+    request_log:
       # Disable access log for health endpoints.
       disable_for_health: false
 
@@ -275,6 +275,10 @@ hsm:
   pin: token-pin-code
   slot: 0
   token_label: hydra
+  # Key set prefix can be used in case of multiple Ory Hydra instances need to store keys on the same HSM partition.
+  # For example if `hsm.key_set_prefix=app1.` then key set `hydra.openid.id-token` would be generated/requested/deleted
+  # on HSM with `CKA_LABEL=app1.hydra.openid.id-token`.
+  key_set_prefix: app1.
 
 # webfinger configures ./well-known/ settings
 webfinger:
@@ -335,9 +339,8 @@ oidc:
 
 urls:
   self:
-
     # This value will be used as the "issuer" in access and ID tokens. It must be
-    # specified and using HTTPS protocol, unless --dangerous-force-http is set. This should typically be equal
+    # specified and using HTTPS protocol, unless --dev is set. This should typically be equal
     # to the public value.
     issuer: https://localhost:4444/
 
@@ -422,7 +425,6 @@ secrets:
     - this-is-the-primary-secret
     - this-is-an-old-secret
     - this-is-another-old-secret
-
 
 # Enables profiling if set. Use "cpu" to enable cpu profiling and "mem" to enable memory profiling. For more details
 # on profiling, head over to: https://blog.golang.org/profiling-go-programs
