@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd_test
 
 import (
@@ -5,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ory/hydra/cmd"
@@ -13,7 +15,7 @@ import (
 )
 
 func TestDeleteAccessTokensCmd(t *testing.T) {
-	c := cmd.NewDeleteAccessTokensCmd(new(cobra.Command))
+	c := cmd.NewDeleteAccessTokensCmd()
 
 	reg := setup(t, c)
 	expected := createClientCredentialsClient(t, reg)

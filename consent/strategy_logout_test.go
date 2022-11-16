@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package consent_test
 
 import (
@@ -21,7 +24,7 @@ import (
 
 	jwtgo "github.com/ory/fosite/token/jwt"
 
-	hydra "github.com/ory/hydra-client-go"
+	hydra "github.com/ory/hydra-client-go/v2"
 	"github.com/ory/hydra/client"
 	"github.com/ory/hydra/driver/config"
 	"github.com/ory/hydra/internal"
@@ -134,12 +137,12 @@ func TestLogoutFlows(t *testing.T) {
 				defer wg.Done()
 			}
 
-			res, _, err := adminApi.V0alpha2Api.AdminGetOAuth2LogoutRequest(ctx).LogoutChallenge(r.URL.Query().Get("logout_challenge")).Execute()
+			res, _, err := adminApi.OAuth2Api.GetOAuth2LogoutRequest(ctx).LogoutChallenge(r.URL.Query().Get("logout_challenge")).Execute()
 			if cb != nil {
 				cb(t, res, err)
 			}
 
-			v, _, err := adminApi.V0alpha2Api.AdminAcceptOAuth2LogoutRequest(ctx).LogoutChallenge(r.URL.Query().Get("logout_challenge")).Execute()
+			v, _, err := adminApi.OAuth2Api.AcceptOAuth2LogoutRequest(ctx).LogoutChallenge(r.URL.Query().Get("logout_challenge")).Execute()
 			require.NoError(t, err)
 			require.NotEmpty(t, v.RedirectTo)
 			http.Redirect(w, r, v.RedirectTo, http.StatusFound)

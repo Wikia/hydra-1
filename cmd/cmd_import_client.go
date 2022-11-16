@@ -1,22 +1,5 @@
-/*
- * Copyright © 2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * @author		Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @copyright 	2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @license 	Apache-2.0
- */
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
 
 package cmd
 
@@ -30,18 +13,19 @@ import (
 
 	"github.com/spf13/cobra"
 
-	hydra "github.com/ory/hydra-client-go"
+	hydra "github.com/ory/hydra-client-go/v2"
 	"github.com/ory/hydra/cmd/cli"
 	"github.com/ory/hydra/cmd/cliclient"
 	"github.com/ory/x/cmdx"
 	"github.com/ory/x/pointerx"
 )
 
-func NewImportClientCmd(root *cobra.Command) *cobra.Command {
+func NewImportClientCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "client [file-1.json] [file-2.json] [file-3.json] [file-n.json]",
-		Short: "Import OAuth 2.0 Clients from files or STDIN",
-		Example: fmt.Sprintf(`Create an example OAuth2 Client:
+		Use:     "oauth2-client <file-1.json> [<file-2.json> ...]",
+		Aliases: []string{"client", "clients", "oauth2-clients"},
+		Short:   "Import one or more OAuth 2.0 Clients from files or STDIN",
+		Example: `Import an example OAuth2 Client:
 	cat > ./file.json <<EOF
 	[
       {
@@ -55,16 +39,16 @@ func NewImportClientCmd(root *cobra.Command) *cobra.Command {
     ]
 	EOF
 
-	%[1]s import client file.json
+	{{ .CommandPath }} file.json
 
 Alternatively:
 
-	cat file.json | %[1]s import client
+	cat file.json | {{ .CommandPath }}
 
-To encrypt an auto-generated OAuth2 Client Secret, use flags `+"`--pgp-key`"+`, `+"`--pgp-key-url`"+` or `+"`--keybase`"+` flag, for example:
+To encrypt an auto-generated OAuth2 Client Secret, use flags ` + "`--pgp-key`" + `, ` + "`--pgp-key-url`" + ` or ` + "`--keybase`" + ` flag, for example:
 
-  %[1]s create client -n "my app" -g client_credentials -r token -a core,foobar --keybase keybase_username
-`, root.Use),
+  {{ .CommandPath }} -n "my app" -g client_credentials -r token -a core,foobar --keybase keybase_username
+`,
 		Long: `This command reads in each listed JSON file and imports their contents as a list of OAuth 2.0 Clients.
 
 The format for the JSON file is:
@@ -78,7 +62,7 @@ The format for the JSON file is:
 
 Please be aware that this command does not update existing clients. If the client exists already, this command will fail.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			m, err := cliclient.NewClient(cmd)
+			m, _, err := cliclient.NewClient(cmd)
 			if err != nil {
 				return err
 			}
@@ -117,7 +101,7 @@ Please be aware that this command does not update existing clients. If the clien
 
 			for src, cc := range clients {
 				for _, c := range cc {
-					result, _, err := m.V0alpha2Api.AdminCreateOAuth2Client(cmd.Context()).OAuth2Client(c).Execute() //nolint:bodyclose
+					result, _, err := m.OAuth2Api.CreateOAuth2Client(cmd.Context()).OAuth2Client(c).Execute() //nolint:bodyclose
 					if err != nil {
 						failed[src] = cmdx.PrintOpenAPIError(cmd, err)
 						continue

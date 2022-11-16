@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package testhelpers
 
 import (
@@ -106,7 +109,7 @@ func IntrospectToken(t *testing.T, conf *oauth2.Config, token string, adminTS *h
 	return gjson.ParseBytes(ioutilx.MustReadAll(res.Body))
 }
 
-func UpdateClientTokenLifespans(t *testing.T, conf *oauth2.Config, clientID string, lifespans client.UpdateOAuth2ClientLifespans, adminTS *httptest.Server) {
+func UpdateClientTokenLifespans(t *testing.T, conf *oauth2.Config, clientID string, lifespans client.Lifespans, adminTS *httptest.Server) {
 	b, err := json.Marshal(lifespans)
 	require.NoError(t, err)
 	req := httpx.MustNewRequest(

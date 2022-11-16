@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package consent_test
 
 import (
@@ -12,6 +15,8 @@ import (
 	"time"
 
 	"github.com/ory/x/ioutilx"
+
+	"github.com/twmb/murmur3"
 
 	"golang.org/x/oauth2"
 
@@ -30,7 +35,7 @@ import (
 	"github.com/ory/x/urlx"
 	"github.com/ory/x/uuidx"
 
-	hydra "github.com/ory/hydra-client-go"
+	hydra "github.com/ory/hydra-client-go/v2"
 	"github.com/ory/hydra/client"
 	"github.com/ory/hydra/driver/config"
 	"github.com/ory/hydra/internal"
@@ -142,7 +147,7 @@ func TestStrategyLoginConsentNext(t *testing.T) {
 
 	t.Run("case=should fail because the request was redirected but the login endpoint rejected the request", func(t *testing.T) {
 		testhelpers.NewLoginConsentUI(t, reg.Config(), func(w http.ResponseWriter, r *http.Request) {
-			vr, _, err := adminClient.V0alpha2Api.AdminRejectOAuth2LoginRequest(context.Background()).
+			vr, _, err := adminClient.OAuth2Api.RejectOAuth2LoginRequest(context.Background()).
 				LoginChallenge(r.URL.Query().Get("login_challenge")).
 				RejectOAuth2Request(hydra.RejectOAuth2Request{
 					Error:            pointerx.String(fosite.ErrInteractionRequired.ErrorField),
@@ -172,7 +177,7 @@ func TestStrategyLoginConsentNext(t *testing.T) {
 		testhelpers.NewLoginConsentUI(t, reg.Config(),
 			acceptLoginHandler(t, "aeneas-rekkas", nil),
 			func(w http.ResponseWriter, r *http.Request) {
-				vr, _, err := adminClient.V0alpha2Api.AdminRejectOAuth2ConsentRequest(context.Background()).
+				vr, _, err := adminClient.OAuth2Api.RejectOAuth2ConsentRequest(context.Background()).
 					ConsentChallenge(r.URL.Query().Get("consent_challenge")).
 					RejectOAuth2Request(hydra.RejectOAuth2Request{
 						Error:            pointerx.String(fosite.ErrInteractionRequired.ErrorField),
@@ -272,6 +277,89 @@ func TestStrategyLoginConsentNext(t *testing.T) {
 			for k := 0; k < 3; k++ {
 				t.Run(fmt.Sprintf("case=%d", k), run)
 			}
+		})
+	})
+
+	t.Run("case=should set client specific csrf cookie names", func(t *testing.T) {
+		subject := "subject-1"
+		consentRequestMaxAge := reg.Config().ConsentRequestMaxAge(ctx).Seconds()
+		c := createDefaultClient(t)
+		testhelpers.NewLoginConsentUI(t, reg.Config(),
+			acceptLoginHandler(t, subject, &hydra.AcceptOAuth2LoginRequest{
+				Remember: pointerx.Bool(true),
+			}),
+			acceptConsentHandler(t, &hydra.AcceptOAuth2ConsentRequest{
+				Remember:   pointerx.Bool(true),
+				GrantScope: []string{"openid"},
+				Session: &hydra.AcceptOAuth2ConsentRequestSession{
+					AccessToken: map[string]interface{}{"foo": "bar"},
+					IdToken:     map[string]interface{}{"bar": "baz"},
+				},
+			}))
+		testhelpers.NewLoginConsentUI(t, reg.Config(),
+			checkAndAcceptLoginHandler(t, adminClient, subject, func(t *testing.T, res *hydra.OAuth2LoginRequest, err error) hydra.AcceptOAuth2LoginRequest {
+				require.NoError(t, err)
+				assert.Empty(t, res.Subject)
+				assert.Empty(t, pointerx.StringR(res.Client.ClientSecret))
+				return hydra.AcceptOAuth2LoginRequest{
+					Subject: subject,
+					Context: map[string]interface{}{"foo": "bar"},
+				}
+			}),
+			checkAndAcceptConsentHandler(t, adminClient, func(t *testing.T, res *hydra.OAuth2ConsentRequest, err error) hydra.AcceptOAuth2ConsentRequest {
+				require.NoError(t, err)
+				assert.Equal(t, subject, *res.Subject)
+				assert.Empty(t, pointerx.StringR(res.Client.ClientSecret))
+				return hydra.AcceptOAuth2ConsentRequest{
+					Remember:   pointerx.Bool(true),
+					GrantScope: []string{"openid"},
+					Session: &hydra.AcceptOAuth2ConsentRequestSession{
+						AccessToken: map[string]interface{}{"foo": "bar"},
+						IdToken:     map[string]interface{}{"bar": "baz"},
+					},
+				}
+			}))
+		hc := &http.Client{
+			Jar:       testhelpers.NewEmptyCookieJar(t),
+			Transport: &http.Transport{},
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+
+		_, oauthRes := makeOAuth2Request(t, reg, hc, c, url.Values{"redirect_uri": {c.RedirectURIs[0]}, "scope": {"openid"}})
+		assert.EqualValues(t, http.StatusFound, oauthRes.StatusCode)
+		loginChallengeRedirect, err := oauthRes.Location()
+		require.NoError(t, err)
+		defer oauthRes.Body.Close()
+		setCookieHeader := oauthRes.Header.Get("set-cookie")
+		assert.NotNil(t, setCookieHeader)
+
+		t.Run("login cookie client specific suffix is set", func(t *testing.T) {
+			assert.Regexp(t, fmt.Sprintf("ory_hydra_login_csrf_dev_%d=.*", murmur3.Sum32(c.ID.Bytes())), setCookieHeader)
+		})
+
+		t.Run("login cookie max age is set", func(t *testing.T) {
+			assert.Regexp(t, fmt.Sprintf("ory_hydra_login_csrf_dev_%d=.*Max-Age=%.0f;.*", murmur3.Sum32(c.ID.Bytes()), consentRequestMaxAge), setCookieHeader)
+		})
+
+		loginChallengeRes, err := hc.Get(loginChallengeRedirect.String())
+		require.NoError(t, err)
+		defer loginChallengeRes.Body.Close()
+
+		loginVerifierRedirect, err := loginChallengeRes.Location()
+		loginVerifierRes, err := hc.Get(loginVerifierRedirect.String())
+		require.NoError(t, err)
+		defer loginVerifierRes.Body.Close()
+		setCookieHeader = loginVerifierRes.Header.Values("set-cookie")[1]
+		assert.NotNil(t, setCookieHeader)
+
+		t.Run("consent cookie client specific suffix set", func(t *testing.T) {
+			assert.Regexp(t, fmt.Sprintf("ory_hydra_consent_csrf_dev_%d=.*", murmur3.Sum32(c.ID.Bytes())), setCookieHeader)
+		})
+
+		t.Run("consent cookie max age is set", func(t *testing.T) {
+			assert.Regexp(t, fmt.Sprintf("ory_hydra_consent_csrf_dev_%d=.*Max-Age=%.0f;.*", murmur3.Sum32(c.ID.Bytes()), consentRequestMaxAge), setCookieHeader)
 		})
 	})
 
@@ -382,7 +470,7 @@ func TestStrategyLoginConsentNext(t *testing.T) {
 
 		testhelpers.NewLoginConsentUI(t, reg.Config(),
 			func(w http.ResponseWriter, r *http.Request) {
-				_, res, err := adminClient.V0alpha2Api.AdminAcceptOAuth2LoginRequest(context.Background()).
+				_, res, err := adminClient.OAuth2Api.AcceptOAuth2LoginRequest(context.Background()).
 					LoginChallenge(r.URL.Query().Get("login_challenge")).
 					AcceptOAuth2LoginRequest(hydra.AcceptOAuth2LoginRequest{
 						Subject: "not-aeneas-rekkas",

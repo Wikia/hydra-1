@@ -1,22 +1,5 @@
-/*
- * Copyright © 2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * @author		Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @copyright 	2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @license 	Apache-2.0
- */
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
 
 package jwk_test
 
@@ -28,7 +11,7 @@ import (
 
 	"github.com/ory/hydra/driver/config"
 
-	hydra "github.com/ory/hydra-client-go"
+	hydra "github.com/ory/hydra-client-go/v2"
 
 	"github.com/ory/hydra/internal"
 	"github.com/ory/hydra/x"
@@ -60,7 +43,7 @@ func TestJWKSDK(t *testing.T) {
 	t.Run("JSON Web Key", func(t *testing.T) {
 		t.Run("CreateJwkSetKey", func(t *testing.T) {
 			// Create a key called set-foo
-			resultKeys, _, err := sdk.V0alpha2Api.AdminCreateJsonWebKeySet(context.Background(), "set-foo").AdminCreateJsonWebKeySetBody(hydra.AdminCreateJsonWebKeySetBody{
+			resultKeys, _, err := sdk.JwkApi.CreateJsonWebKeySet(context.Background(), "set-foo").CreateJsonWebKeySet(hydra.CreateJsonWebKeySet{
 				Alg: "RS256",
 				Kid: "key-bar",
 				Use: "sig",
@@ -74,7 +57,7 @@ func TestJWKSDK(t *testing.T) {
 
 		var resultKeys *hydra.JsonWebKeySet
 		t.Run("GetJwkSetKey after create", func(t *testing.T) {
-			result, _, err := sdk.V0alpha2Api.AdminGetJsonWebKey(ctx, "set-foo", expectedKid).Execute()
+			result, _, err := sdk.JwkApi.GetJsonWebKey(ctx, "set-foo", expectedKid).Execute()
 			require.NoError(t, err)
 			require.Len(t, result.Keys, 1)
 			require.Equal(t, expectedKid, result.Keys[0].Kid)
@@ -90,19 +73,19 @@ func TestJWKSDK(t *testing.T) {
 			require.Len(t, resultKeys.Keys, 1)
 			resultKeys.Keys[0].Alg = "ES256"
 
-			resultKey, _, err := sdk.V0alpha2Api.AdminUpdateJsonWebKey(ctx, "set-foo", expectedKid).JsonWebKey(resultKeys.Keys[0]).Execute()
+			resultKey, _, err := sdk.JwkApi.SetJsonWebKey(ctx, "set-foo", expectedKid).JsonWebKey(resultKeys.Keys[0]).Execute()
 			require.NoError(t, err)
 			assert.Equal(t, expectedKid, resultKey.Kid)
 			assert.Equal(t, "ES256", resultKey.Alg)
 		})
 
 		t.Run("DeleteJwkSetKey after delete", func(t *testing.T) {
-			_, err := sdk.V0alpha2Api.AdminDeleteJsonWebKey(ctx, "set-foo", expectedKid).Execute()
+			_, err := sdk.JwkApi.DeleteJsonWebKey(ctx, "set-foo", expectedKid).Execute()
 			require.NoError(t, err)
 		})
 
 		t.Run("GetJwkSetKey after delete", func(t *testing.T) {
-			_, res, err := sdk.V0alpha2Api.AdminGetJsonWebKey(ctx, "set-foo", expectedKid).Execute()
+			_, res, err := sdk.JwkApi.GetJsonWebKey(ctx, "set-foo", expectedKid).Execute()
 			require.Error(t, err)
 			assert.Equal(t, http.StatusNotFound, res.StatusCode)
 		})
@@ -111,7 +94,7 @@ func TestJWKSDK(t *testing.T) {
 
 	t.Run("JWK Set", func(t *testing.T) {
 		t.Run("CreateJwkSetKey", func(t *testing.T) {
-			resultKeys, _, err := sdk.V0alpha2Api.AdminCreateJsonWebKeySet(ctx, "set-foo2").AdminCreateJsonWebKeySetBody(hydra.AdminCreateJsonWebKeySetBody{
+			resultKeys, _, err := sdk.JwkApi.CreateJsonWebKeySet(ctx, "set-foo2").CreateJsonWebKeySet(hydra.CreateJsonWebKeySet{
 				Alg: "RS256",
 				Kid: "key-bar",
 			}).Execute()
@@ -121,7 +104,7 @@ func TestJWKSDK(t *testing.T) {
 			assert.Equal(t, "RS256", resultKeys.Keys[0].Alg)
 		})
 
-		resultKeys, _, err := sdk.V0alpha2Api.AdminGetJsonWebKeySet(ctx, "set-foo2").Execute()
+		resultKeys, _, err := sdk.JwkApi.GetJsonWebKeySet(ctx, "set-foo2").Execute()
 		t.Run("GetJwkSet after create", func(t *testing.T) {
 			require.NoError(t, err)
 			if conf.HSMEnabled() {
@@ -142,7 +125,7 @@ func TestJWKSDK(t *testing.T) {
 			require.Len(t, resultKeys.Keys, 1)
 			resultKeys.Keys[0].Alg = "ES256"
 
-			result, _, err := sdk.V0alpha2Api.AdminUpdateJsonWebKeySet(ctx, "set-foo2").JsonWebKeySet(*resultKeys).Execute()
+			result, _, err := sdk.JwkApi.SetJsonWebKeySet(ctx, "set-foo2").JsonWebKeySet(*resultKeys).Execute()
 			require.NoError(t, err)
 			require.Len(t, result.Keys, 1)
 			assert.Equal(t, expectedKid, result.Keys[0].Kid)
@@ -150,18 +133,18 @@ func TestJWKSDK(t *testing.T) {
 		})
 
 		t.Run("DeleteJwkSet", func(t *testing.T) {
-			_, err := sdk.V0alpha2Api.AdminDeleteJsonWebKeySet(ctx, "set-foo2").Execute()
+			_, err := sdk.JwkApi.DeleteJsonWebKeySet(ctx, "set-foo2").Execute()
 			require.NoError(t, err)
 		})
 
 		t.Run("GetJwkSet after delete", func(t *testing.T) {
-			_, res, err := sdk.V0alpha2Api.AdminGetJsonWebKeySet(ctx, "set-foo2").Execute()
+			_, res, err := sdk.JwkApi.GetJsonWebKeySet(ctx, "set-foo2").Execute()
 			require.Error(t, err)
 			assert.Equal(t, http.StatusNotFound, res.StatusCode)
 		})
 
 		t.Run("GetJwkSetKey after delete", func(t *testing.T) {
-			_, res, err := sdk.V0alpha2Api.AdminGetJsonWebKey(ctx, "set-foo2", expectedKid).Execute()
+			_, res, err := sdk.JwkApi.GetJsonWebKey(ctx, "set-foo2", expectedKid).Execute()
 			require.Error(t, err)
 			assert.Equal(t, http.StatusNotFound, res.StatusCode)
 		})

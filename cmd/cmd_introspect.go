@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd
 
 import (
@@ -6,12 +9,11 @@ import (
 	"github.com/ory/x/cmdx"
 )
 
-func NewIntrospectCmd(root *cobra.Command) *cobra.Command {
+func NewIntrospectCmd() *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:   "introspect",
 		Short: "Introspect resources",
 	}
-	cmd.AddCommand(NewIntrospectTokenCmd(root))
 	cmdx.RegisterHTTPClientFlags(cmd.PersistentFlags())
 	cmdx.RegisterFormatFlags(cmd.PersistentFlags())
 	return cmd

@@ -1,22 +1,5 @@
-/*
- * Copyright © 2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * @author		Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @Copyright 	2017-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @license 	Apache-2.0
- */
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
 
 package main
 
@@ -26,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	hydra "github.com/ory/hydra-client-go"
+	hydra "github.com/ory/hydra-client-go/v2"
 
 	"github.com/ory/x/pointerx"
 	"github.com/ory/x/urlx"
@@ -41,7 +24,7 @@ func init() {
 
 func login(rw http.ResponseWriter, r *http.Request) {
 	challenge := r.URL.Query().Get("login_challenge")
-	lr, resp, err := client.V0alpha2Api.AdminGetOAuth2LoginRequest(r.Context()).LoginChallenge(challenge).Execute()
+	lr, resp, err := client.OAuth2Api.GetOAuth2LoginRequest(r.Context()).LoginChallenge(challenge).Execute()
 	defer resp.Body.Close()
 	if err != nil {
 		log.Fatalf("Unable to fetch clogin request: %s", err)
@@ -54,7 +37,7 @@ func login(rw http.ResponseWriter, r *http.Request) {
 			remember = true
 		}
 
-		vr, resp, err := client.V0alpha2Api.AdminAcceptOAuth2LoginRequest(r.Context()).
+		vr, resp, err := client.OAuth2Api.AcceptOAuth2LoginRequest(r.Context()).
 			LoginChallenge(challenge).
 			AcceptOAuth2LoginRequest(hydra.AcceptOAuth2LoginRequest{
 				Subject:  "the-subject",
@@ -66,7 +49,7 @@ func login(rw http.ResponseWriter, r *http.Request) {
 		}
 		redirectTo = vr.RedirectTo
 	} else {
-		vr, resp, err := client.V0alpha2Api.AdminRejectOAuth2LoginRequest(r.Context()).
+		vr, resp, err := client.OAuth2Api.RejectOAuth2LoginRequest(r.Context()).
 			LoginChallenge(challenge).
 			RejectOAuth2Request(hydra.RejectOAuth2Request{
 				Error: pointerx.String("invalid_request"),
@@ -86,7 +69,7 @@ func login(rw http.ResponseWriter, r *http.Request) {
 func consent(rw http.ResponseWriter, r *http.Request) {
 	challenge := r.URL.Query().Get("consent_challenge")
 
-	o, resp, err := client.V0alpha2Api.AdminGetOAuth2ConsentRequest(r.Context()).ConsentChallenge(challenge).Execute()
+	o, resp, err := client.OAuth2Api.GetOAuth2ConsentRequest(r.Context()).ConsentChallenge(challenge).Execute()
 	defer resp.Body.Close()
 	if err != nil {
 		log.Fatalf("Unable to fetch consent request: %s", err)
@@ -103,7 +86,7 @@ func consent(rw http.ResponseWriter, r *http.Request) {
 			value = "rab"
 		}
 
-		v, resp, err := client.V0alpha2Api.AdminAcceptOAuth2ConsentRequest(r.Context()).
+		v, resp, err := client.OAuth2Api.AcceptOAuth2ConsentRequest(r.Context()).
 			ConsentChallenge(challenge).
 			AcceptOAuth2ConsentRequest(hydra.AcceptOAuth2ConsentRequest{
 				GrantScope: o.RequestedScope,
@@ -119,7 +102,7 @@ func consent(rw http.ResponseWriter, r *http.Request) {
 		}
 		redirectTo = v.RedirectTo
 	} else {
-		v, resp, err := client.V0alpha2Api.AdminRejectOAuth2ConsentRequest(r.Context()).
+		v, resp, err := client.OAuth2Api.RejectOAuth2ConsentRequest(r.Context()).
 			ConsentChallenge(challenge).
 			RejectOAuth2Request(hydra.RejectOAuth2Request{Error: pointerx.String("invalid_request")}).Execute()
 		defer resp.Body.Close()

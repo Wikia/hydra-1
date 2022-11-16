@@ -1,22 +1,5 @@
-/*
- * Copyright © 2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * @author		Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @copyright 	2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @license 	Apache-2.0
- */
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
 
 package oauth2_test
 
@@ -38,7 +21,7 @@ import (
 	"github.com/ory/x/ioutilx"
 	"github.com/ory/x/requirex"
 
-	hydra "github.com/ory/hydra-client-go"
+	hydra "github.com/ory/hydra-client-go/v2"
 
 	"github.com/ory/x/httprouterx"
 
@@ -142,7 +125,7 @@ func TestAuthCodeWithDefaultStrategy(t *testing.T) {
 
 	acceptLoginHandler := func(t *testing.T, c *client.Client, subject string, checkRequestPayload func(request *hydra.OAuth2LoginRequest) *hydra.AcceptOAuth2LoginRequest) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			rr, _, err := adminClient.V0alpha2Api.AdminGetOAuth2LoginRequest(context.Background()).LoginChallenge(r.URL.Query().Get("login_challenge")).Execute()
+			rr, _, err := adminClient.OAuth2Api.GetOAuth2LoginRequest(context.Background()).LoginChallenge(r.URL.Query().Get("login_challenge")).Execute()
 			require.NoError(t, err)
 
 			assert.EqualValues(t, c.GetID(), pointerx.StringR(rr.Client.ClientId))
@@ -167,7 +150,7 @@ func TestAuthCodeWithDefaultStrategy(t *testing.T) {
 				}
 			}
 
-			v, _, err := adminClient.V0alpha2Api.AdminAcceptOAuth2LoginRequest(context.Background()).
+			v, _, err := adminClient.OAuth2Api.AcceptOAuth2LoginRequest(context.Background()).
 				LoginChallenge(r.URL.Query().Get("login_challenge")).
 				AcceptOAuth2LoginRequest(acceptBody).
 				Execute()
@@ -179,7 +162,7 @@ func TestAuthCodeWithDefaultStrategy(t *testing.T) {
 
 	acceptConsentHandler := func(t *testing.T, c *client.Client, subject string, checkRequestPayload func(*hydra.OAuth2ConsentRequest)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			rr, _, err := adminClient.V0alpha2Api.AdminGetOAuth2ConsentRequest(context.Background()).ConsentChallenge(r.URL.Query().Get("consent_challenge")).Execute()
+			rr, _, err := adminClient.OAuth2Api.GetOAuth2ConsentRequest(context.Background()).ConsentChallenge(r.URL.Query().Get("consent_challenge")).Execute()
 			require.NoError(t, err)
 
 			assert.EqualValues(t, c.GetID(), pointerx.StringR(rr.Client.ClientId))
@@ -196,7 +179,7 @@ func TestAuthCodeWithDefaultStrategy(t *testing.T) {
 			}
 
 			assert.Equal(t, map[string]interface{}{"context": "bar"}, rr.Context)
-			v, _, err := adminClient.V0alpha2Api.AdminAcceptOAuth2ConsentRequest(context.Background()).
+			v, _, err := adminClient.OAuth2Api.AcceptOAuth2ConsentRequest(context.Background()).
 				ConsentChallenge(r.URL.Query().Get("consent_challenge")).
 				AcceptOAuth2ConsentRequest(hydra.AcceptOAuth2ConsentRequest{
 					GrantScope: []string{"hydra", "offline", "openid"}, Remember: pointerx.Bool(true), RememberFor: pointerx.Int64(0),
@@ -368,7 +351,7 @@ func TestAuthCodeWithDefaultStrategy(t *testing.T) {
 
 	t.Run("case=checks if request fails when subject is empty", func(t *testing.T) {
 		testhelpers.NewLoginConsentUI(t, reg.Config(), func(w http.ResponseWriter, r *http.Request) {
-			_, res, err := adminClient.V0alpha2Api.AdminAcceptOAuth2LoginRequest(ctx).
+			_, res, err := adminClient.OAuth2Api.AcceptOAuth2LoginRequest(ctx).
 				LoginChallenge(r.URL.Query().Get("login_challenge")).
 				AcceptOAuth2LoginRequest(hydra.AcceptOAuth2LoginRequest{Subject: "", Remember: pointerx.Bool(true)}).Execute()
 			require.Error(t, err) // expects 400
@@ -412,7 +395,7 @@ func TestAuthCodeWithDefaultStrategy(t *testing.T) {
 	})
 
 	t.Run("case=respects client token lifespan configuration", func(t *testing.T) {
-		run := func(t *testing.T, strategy string, c *hc.Client, conf *oauth2.Config, expectedLifespans client.UpdateOAuth2ClientLifespans) {
+		run := func(t *testing.T, strategy string, c *hc.Client, conf *oauth2.Config, expectedLifespans client.Lifespans) {
 			testhelpers.NewLoginConsentUI(t, reg.Config(),
 				acceptLoginHandler(t, c, subject, nil),
 				acceptConsentHandler(t, c, subject, nil),
@@ -491,10 +474,10 @@ func TestAuthCodeWithDefaultStrategy(t *testing.T) {
 		t.Run("case=custom-lifespans-unset", func(t *testing.T) {
 			c, conf := newOAuth2Client(t, testhelpers.NewCallbackURL(t, "callback", testhelpers.HTTPServerNotImplementedHandler))
 			testhelpers.UpdateClientTokenLifespans(t, &goauth2.Config{ClientID: c.GetID(), ClientSecret: conf.ClientSecret}, c.GetID(), testhelpers.TestLifespans, adminTS)
-			testhelpers.UpdateClientTokenLifespans(t, &goauth2.Config{ClientID: c.GetID(), ClientSecret: conf.ClientSecret}, c.GetID(), client.UpdateOAuth2ClientLifespans{}, adminTS)
+			testhelpers.UpdateClientTokenLifespans(t, &goauth2.Config{ClientID: c.GetID(), ClientSecret: conf.ClientSecret}, c.GetID(), client.Lifespans{}, adminTS)
 			reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, "opaque")
 
-			expectedLifespans := client.UpdateOAuth2ClientLifespans{
+			expectedLifespans := client.Lifespans{
 				AuthorizationCodeGrantAccessTokenLifespan:  x.NullDuration{Valid: true, Duration: reg.Config().GetAccessTokenLifespan(ctx)},
 				AuthorizationCodeGrantIDTokenLifespan:      x.NullDuration{Valid: true, Duration: reg.Config().GetIDTokenLifespan(ctx)},
 				AuthorizationCodeGrantRefreshTokenLifespan: x.NullDuration{Valid: true, Duration: reg.Config().GetRefreshTokenLifespan(ctx)},

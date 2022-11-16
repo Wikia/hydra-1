@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd_test
 
 import (
@@ -7,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -20,7 +22,7 @@ import (
 
 func TestDeleteClient(t *testing.T) {
 	ctx := context.Background()
-	c := cmd.NewDeleteClientCmd(new(cobra.Command))
+	c := cmd.NewDeleteClientCmd()
 	reg := setup(t, c)
 
 	t.Run("case=deletes client", func(t *testing.T) {

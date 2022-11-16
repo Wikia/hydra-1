@@ -1,28 +1,13 @@
-/*
- * Copyright © 2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * @author		Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @copyright 	2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @license 	Apache-2.0
- */
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
 
 package cmd
 
 import (
 	"fmt"
 	"os"
+
+	"github.com/ory/x/cmdx"
 
 	"github.com/ory/hydra/driver"
 	"github.com/ory/x/configx"
@@ -31,73 +16,84 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// This represents the base command when called without any subcommands
 func NewRootCmd(slOpts []servicelocatorx.Option, dOpts []driver.OptionsModifier, cOpts []configx.OptionModifier) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hydra",
 		Short: "Run and manage Ory Hydra",
 	}
+	cmdx.EnableUsageTemplating(cmd)
 	RegisterCommandRecursive(cmd, slOpts, dOpts, cOpts)
 	return cmd
 }
 
 func RegisterCommandRecursive(parent *cobra.Command, slOpts []servicelocatorx.Option, dOpts []driver.OptionsModifier, cOpts []configx.OptionModifier) {
-	createCmd := NewCreateCmd(parent)
-	parent.AddCommand(createCmd)
-	createCmd.AddCommand(NewCreateClientsCommand(parent))
-	createCmd.AddCommand(NewCreateJWKSCmd(parent))
+	createCmd := NewCreateCmd()
+	createCmd.AddCommand(
+		NewCreateClientsCommand(),
+		NewCreateJWKSCmd(),
+	)
 
-	getCmd := NewGetCmd(parent)
-	parent.AddCommand(getCmd)
-	getCmd.AddCommand(NewGetClientsCmd(parent))
-	getCmd.AddCommand(NewGetJWKSCmd(parent))
+	getCmd := NewGetCmd()
+	getCmd.AddCommand(
+		NewGetClientsCmd(),
+		NewGetJWKSCmd(),
+	)
 
-	deleteCmd := NewDeleteCmd(parent)
-	parent.AddCommand(deleteCmd)
-	deleteCmd.AddCommand(NewDeleteClientCmd(parent))
-	deleteCmd.AddCommand(NewDeleteJWKSCommand(parent))
-	deleteCmd.AddCommand(NewDeleteAccessTokensCmd(parent))
+	deleteCmd := NewDeleteCmd()
+	deleteCmd.AddCommand(
+		NewDeleteClientCmd(),
+		NewDeleteJWKSCommand(),
+		NewDeleteAccessTokensCmd(),
+	)
 
-	listCmd := NewListCmd(parent)
-	parent.AddCommand(listCmd)
-	listCmd.AddCommand(NewListClientsCmd(parent))
+	listCmd := NewListCmd()
+	listCmd.AddCommand(NewListClientsCmd())
 
-	updateCmd := NewUpdateCmd(parent)
-	parent.AddCommand(updateCmd)
-	updateCmd.AddCommand(NewUpdateClientCmd(parent))
+	updateCmd := NewUpdateCmd()
+	updateCmd.AddCommand(NewUpdateClientCmd())
 
-	importCmd := NewImportCmd(parent)
-	parent.AddCommand(importCmd)
-	importCmd.AddCommand(NewImportClientCmd(parent))
-	importCmd.AddCommand(NewKeysImportCmd(parent))
+	importCmd := NewImportCmd()
+	importCmd.AddCommand(
+		NewImportClientCmd(),
+		NewKeysImportCmd(),
+	)
 
-	performCmd := NewPerformCmd(parent)
-	parent.AddCommand(performCmd)
-	performCmd.AddCommand(NewPerformClientCredentialsCmd(parent))
-	performCmd.AddCommand(NewPerformAuthorizationCodeCmd(parent))
+	performCmd := NewPerformCmd()
+	performCmd.AddCommand(
+		NewPerformClientCredentialsCmd(),
+		NewPerformAuthorizationCodeCmd(),
+	)
 
-	revokeCmd := NewRevokeCmd(parent)
-	parent.AddCommand(revokeCmd)
-	revokeCmd.AddCommand(NewRevokeTokenCmd(parent))
+	revokeCmd := NewRevokeCmd()
+	revokeCmd.AddCommand(NewRevokeTokenCmd())
 
-	introspectCmd := NewIntrospectCmd(parent)
-	parent.AddCommand(introspectCmd)
-	introspectCmd.AddCommand(NewIntrospectTokenCmd(parent))
-
-	parent.AddCommand(NewJanitorCmd(slOpts, dOpts, cOpts))
+	introspectCmd := NewIntrospectCmd()
+	introspectCmd.AddCommand(NewIntrospectTokenCmd())
 
 	migrateCmd := NewMigrateCmd()
-	parent.AddCommand(migrateCmd)
 	migrateCmd.AddCommand(NewMigrateGenCmd())
 	migrateCmd.AddCommand(NewMigrateSqlCmd(slOpts, dOpts, cOpts))
 
 	serveCmd := NewServeCmd()
-	parent.AddCommand(serveCmd)
 	serveCmd.AddCommand(NewServeAdminCmd(slOpts, dOpts, cOpts))
 	serveCmd.AddCommand(NewServePublicCmd(slOpts, dOpts, cOpts))
 	serveCmd.AddCommand(NewServeAllCmd(slOpts, dOpts, cOpts))
 
-	parent.AddCommand(NewVersionCmd())
+	parent.AddCommand(
+		createCmd,
+		getCmd,
+		deleteCmd,
+		listCmd,
+		updateCmd,
+		importCmd,
+		performCmd,
+		introspectCmd,
+		revokeCmd,
+		migrateCmd,
+		serveCmd,
+		NewJanitorCmd(slOpts, dOpts, cOpts),
+		NewVersionCmd(),
+	)
 }
 
 // Execute adds all child commands to the root command sets flags appropriately.
