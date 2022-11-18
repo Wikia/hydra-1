@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd_test
 
 import (
@@ -6,7 +9,6 @@ import (
 
 	"github.com/gofrs/uuid"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -17,7 +19,7 @@ import (
 
 func TestCreateJWKS(t *testing.T) {
 	ctx := context.Background()
-	c := cmd.NewCreateJWKSCmd(new(cobra.Command))
+	c := cmd.NewCreateJWKSCmd()
 	reg := setup(t, c)
 
 	t.Run("case=creates successfully", func(t *testing.T) {

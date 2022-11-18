@@ -1,22 +1,5 @@
-/*
- * Copyright © 2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * @author		Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @copyright 	2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @license 	Apache-2.0
- */
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
 
 package cmd
 
@@ -32,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ory/hydra/cmd/cliclient"
 
 	"github.com/pkg/errors"
 
@@ -87,10 +72,10 @@ var tokenUserResult = template.Must(template.New("").Parse(`<html>
 </body>
 </html>`))
 
-func NewPerformAuthorizationCodeCmd(parent *cobra.Command) *cobra.Command {
+func NewPerformAuthorizationCodeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "authorization-code",
-		Example: fmt.Sprintf("%s perform authorization-code --client-id ... --client-secret ...", parent.Use),
+		Example: "{{ .CommandPath }} --client-id ... --client-secret ...",
 		Short:   "An exemplary OAuth 2.0 Client performing the OAuth 2.0 Authorize Code Flow",
 		Long: `Starts an exemplary web server that acts as an OAuth 2.0 Client performing the Authorize Code Flow.
 This command will help you to see if Ory Hydra has been configured properly.
@@ -98,10 +83,12 @@ This command will help you to see if Ory Hydra has been configured properly.
 This command must not be used for anything else than manual testing or demo purposes. The server will terminate on error
 and success, unless if the --no-shutdown flag is provided.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, _, err := cmdx.NewClient(cmd)
+			client, endpoint, err := cliclient.NewClient(cmd)
 			if err != nil {
 				return err
 			}
+
+			endpoint = cliclient.GetOAuth2URLOverride(cmd, endpoint)
 
 			ctx := context.WithValue(cmd.Context(), oauth2.HTTPClient, client)
 			isSSL := flagx.MustGetBool(cmd, "https")
@@ -131,7 +118,6 @@ and success, unless if the --no-shutdown flag is provided.`,
 				redirectUrl = serverLocation + "callback"
 			}
 
-			remote, err := cmdx.RemoteURI(cmd)
 			if err != nil {
 				return err
 			}
@@ -139,8 +125,8 @@ and success, unless if the --no-shutdown flag is provided.`,
 				ClientID:     clientID,
 				ClientSecret: clientSecret,
 				Endpoint: oauth2.Endpoint{
-					TokenURL: urlx.AppendPaths(remote, "/oauth2/token").String(),
-					AuthURL:  urlx.AppendPaths(remote, "/oauth2/auth").String(),
+					TokenURL: urlx.AppendPaths(endpoint, "/oauth2/token").String(),
+					AuthURL:  urlx.AppendPaths(endpoint, "/oauth2/auth").String(),
 				},
 				RedirectURL: redirectUrl,
 				Scopes:      scopes,

@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build conformity
 // +build conformity
 
@@ -17,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	hydrac "github.com/ory/hydra-client-go"
+	backoff "github.com/cenkalti/backoff/v3"
 
-	"github.com/cenkalti/backoff/v3"
+	hydrac "github.com/ory/hydra-client-go/v2"
 
 	"github.com/ory/x/httpx"
 
@@ -274,7 +277,7 @@ func createPlan(t *testing.T, extra url.Values, isParallel bool) {
 								bo := conf.NextBackOff()
 								require.NotEqual(t, backoff.Stop, bo, "%+v", err)
 
-								_, _, err = hydra.V0alpha2Api.AdminCreateJsonWebKeySet(context.Background(), "hydra.openid.id-token").AdminCreateJsonWebKeySetBody(hydrac.AdminCreateJsonWebKeySetBody{
+								_, _, err = hydra.JwkApi.CreateJsonWebKeySet(context.Background(), "hydra.openid.id-token").CreateJsonWebKeySet(hydrac.CreateJsonWebKeySet{
 									Alg: "RS256",
 								}).Execute()
 								if err == nil {

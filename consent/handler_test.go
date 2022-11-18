@@ -1,22 +1,5 @@
-/*
- * Copyright © 2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * @author		Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @Copyright 	2017-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @license 	Apache-2.0
- */
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
 
 package consent_test
 
@@ -41,7 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	hydra "github.com/ory/hydra-client-go"
+	hydra "github.com/ory/hydra-client-go/v2"
 	"github.com/ory/hydra/client"
 	. "github.com/ory/hydra/consent"
 )
@@ -87,7 +70,7 @@ func TestGetLogoutRequest(t *testing.T) {
 			require.EqualValues(t, tc.status, resp.StatusCode)
 
 			if tc.handled {
-				var result HandledOAuth2ConsentRequest
+				var result OAuth2RedirectTo
 				require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 				require.Equal(t, requestURL, result.RedirectTo)
 			} else if tc.exists {
@@ -145,7 +128,7 @@ func TestGetLoginRequest(t *testing.T) {
 			require.EqualValues(t, tc.status, resp.StatusCode)
 
 			if tc.handled {
-				var result HandledOAuth2ConsentRequest
+				var result OAuth2RedirectTo
 				require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 				require.Equal(t, requestURL, result.RedirectTo)
 			} else if tc.exists {
@@ -217,7 +200,7 @@ func TestGetConsentRequest(t *testing.T) {
 			require.EqualValues(t, tc.status, resp.StatusCode)
 
 			if tc.handled {
-				var result HandledOAuth2ConsentRequest
+				var result OAuth2RedirectTo
 				require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 				require.Equal(t, requestURL, result.RedirectTo)
 			} else if tc.exists {
@@ -274,7 +257,7 @@ func TestGetLoginRequestWithDuplicateAccept(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, http.StatusOK, resp.StatusCode)
 
-		var result RequestHandlerResponse
+		var result OAuth2RedirectTo
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 		require.NotNil(t, result.RedirectTo)
 		require.Contains(t, result.RedirectTo, "login_verifier")
@@ -288,7 +271,7 @@ func TestGetLoginRequestWithDuplicateAccept(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, http.StatusOK, resp2.StatusCode)
 
-		var result2 RequestHandlerResponse
+		var result2 OAuth2RedirectTo
 		require.NoError(t, json.NewDecoder(resp2.Body).Decode(&result2))
 		require.NotNil(t, result2.RedirectTo)
 		require.Contains(t, result2.RedirectTo, "login_verifier")

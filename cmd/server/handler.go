@@ -1,22 +1,5 @@
-/*
- * Copyright © 2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * @author		Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @copyright 	2015-2018 Aeneas Rekkas <aeneas+oss@aeneas.io>
- * @license 	Apache-2.0
- */
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
 
 package server
 
@@ -331,9 +314,10 @@ func serve(
 	}
 
 	var tlsConfig *tls.Config
+	stopReload := make(chan struct{})
 	if tc := d.Config().TLS(ctx, iface); tc.Enabled() {
 		// #nosec G402 - This is a false positive because we use graceful.WithDefaults which sets the correct TLS settings.
-		tlsConfig = &tls.Config{Certificates: GetOrCreateTLSCertificate(ctx, cmd, d, iface)}
+		tlsConfig = &tls.Config{GetCertificate: GetOrCreateTLSCertificate(ctx, d, iface, stopReload)}
 	}
 
 	var srv = graceful.WithDefaults(&http.Server{
@@ -362,7 +346,10 @@ func serve(
 		}
 
 		return srv.Serve(listener)
-	}, srv.Shutdown); err != nil {
+	}, func(ctx context.Context) error {
+		close(stopReload)
+		return srv.Shutdown(ctx)
+	}); err != nil {
 		d.Logger().WithError(err).Fatal("Could not gracefully run server")
 	}
 }

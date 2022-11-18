@@ -1,16 +1,5 @@
-// Copyright © 2018 NAME HERE <EMAIL ADDRESS>
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
 
 package cmd
 
@@ -24,7 +13,7 @@ import (
 	"github.com/gofrs/uuid"
 	"github.com/spf13/cobra"
 
-	hydra "github.com/ory/hydra-client-go"
+	hydra "github.com/ory/hydra-client-go/v2"
 	"github.com/ory/hydra/cmd/cli"
 	"github.com/ory/hydra/cmd/cliclient"
 	"github.com/ory/x/cmdx"
@@ -32,19 +21,19 @@ import (
 	"github.com/ory/x/josex"
 )
 
-func NewKeysImportCmd(parent *cobra.Command) *cobra.Command {
+func NewKeysImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "jwk set-id file-1 [file-2] [file-n]",
 		Args: cobra.MinimumNArgs(1),
-		Example: fmt.Sprintf(`%[1]s import keys my-set ./path/to/jwk.json ./path/to/jwk-2.json --format json
-%[1]s import keys my-set ./path/to/rsa.key ./path/to/rsa.pub --use enc`, parent.Use),
+		Example: `{{ .CommandPath }} my-set ./path/to/jwk.json ./path/to/jwk-2.json --format json
+{{ .CommandPath }} my-set ./path/to/rsa.key ./path/to/rsa.pub --use enc`,
 		Short: "Imports JSON Web Keys from one or more JSON files.",
 		Long: `This command allows you to import JSON Web Keys from one or more JSON files or STDIN to the JSON Web Key Store.
 
 Currently supported formats are raw JSON Web Keys or PEM/DER encoded data. If the JSON Web Key Set exists already,
 the imported keys will be added to that set. Otherwise, a new set will be created.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			m, err := cliclient.NewClient(cmd)
+			m, _, err := cliclient.NewClient(cmd)
 			if err != nil {
 				return err
 			}
@@ -125,7 +114,7 @@ the imported keys will be added to that set. Otherwise, a new set will be create
 			failed := make(map[string]error)
 			for src, kk := range keys {
 				for _, k := range kk {
-					result, _, err := m.V0alpha2Api.AdminUpdateJsonWebKey(cmd.Context(), k.Kid, set).JsonWebKey(k).Execute() //nolint:bodyclose
+					result, _, err := m.JwkApi.SetJsonWebKey(cmd.Context(), set, k.Kid).JsonWebKey(k).Execute() //nolint:bodyclose
 					if err != nil {
 						failed[src] = cmdx.PrintOpenAPIError(cmd, err)
 						continue

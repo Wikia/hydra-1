@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd_test
 
 import (
@@ -7,12 +10,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
-	hydra "github.com/ory/hydra-client-go"
+	hydra "github.com/ory/hydra-client-go/v2"
 	"github.com/ory/hydra/cmd"
 	"github.com/ory/x/cmdx"
 	"github.com/ory/x/pointerx"
@@ -33,7 +35,7 @@ func writeTempFile(t *testing.T, contents interface{}) string {
 
 func TestImportClient(t *testing.T) {
 	ctx := context.Background()
-	c := cmd.NewImportClientCmd(new(cobra.Command))
+	c := cmd.NewImportClientCmd()
 	reg := setup(t, c)
 
 	file1 := writeTempFile(t, []hydra.OAuth2Client{{Scope: pointerx.String("foo")}, {Scope: pointerx.String("bar"), ClientSecret: pointerx.String("some-secret")}})

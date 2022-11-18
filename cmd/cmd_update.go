@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd
 
 import (
@@ -6,7 +9,7 @@ import (
 	"github.com/ory/x/cmdx"
 )
 
-func NewUpdateCmd(root *cobra.Command) *cobra.Command {
+func NewUpdateCmd() *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:   "update",
 		Short: "Update resources",

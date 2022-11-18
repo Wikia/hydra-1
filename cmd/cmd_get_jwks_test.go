@@ -1,3 +1,6 @@
+// Copyright © 2022 Ory Corp
+// SPDX-License-Identifier: Apache-2.0
+
 package cmd_test
 
 import (
@@ -6,7 +9,6 @@ import (
 
 	"github.com/gofrs/uuid"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -17,7 +19,7 @@ import (
 
 func TestGetJwks(t *testing.T) {
 	ctx := context.Background()
-	c := cmd.NewGetJWKSCmd(new(cobra.Command))
+	c := cmd.NewGetJWKSCmd()
 	reg := setup(t, c)
 
 	set := uuid.Must(uuid.NewV4()).String()
