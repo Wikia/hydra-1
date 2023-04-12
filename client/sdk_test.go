@@ -21,44 +21,45 @@ import (
 
 	"github.com/mohae/deepcopy"
 
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/x"
 	"github.com/ory/x/contextx"
 	"github.com/ory/x/pointerx"
 
-	"github.com/ory/hydra/driver/config"
+	"github.com/ory/hydra/v2/driver/config"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ory/hydra/internal"
+	"github.com/ory/hydra/v2/internal"
 
 	hydra "github.com/ory/hydra-client-go/v2"
-	"github.com/ory/hydra/client"
+	"github.com/ory/hydra/v2/client"
 )
 
 func createTestClient(prefix string) hydra.OAuth2Client {
 	return hydra.OAuth2Client{
-		ClientName:                pointerx.String(prefix + "name"),
-		ClientSecret:              pointerx.String(prefix + "secret"),
-		ClientUri:                 pointerx.String(prefix + "uri"),
+		ClientName:                pointerx.Ptr(prefix + "name"),
+		ClientSecret:              pointerx.Ptr(prefix + "secret"),
+		ClientUri:                 pointerx.Ptr(prefix + "uri"),
 		Contacts:                  []string{prefix + "peter", prefix + "pan"},
 		GrantTypes:                []string{prefix + "client_credentials", prefix + "authorize_code"},
-		LogoUri:                   pointerx.String(prefix + "logo"),
-		Owner:                     pointerx.String(prefix + "an-owner"),
-		PolicyUri:                 pointerx.String(prefix + "policy-uri"),
-		Scope:                     pointerx.String(prefix + "foo bar baz"),
-		TosUri:                    pointerx.String(prefix + "tos-uri"),
+		LogoUri:                   pointerx.Ptr(prefix + "logo"),
+		Owner:                     pointerx.Ptr(prefix + "an-owner"),
+		PolicyUri:                 pointerx.Ptr(prefix + "policy-uri"),
+		Scope:                     pointerx.Ptr(prefix + "foo bar baz"),
+		TosUri:                    pointerx.Ptr(prefix + "tos-uri"),
 		ResponseTypes:             []string{prefix + "id_token", prefix + "code"},
 		RedirectUris:              []string{"https://" + prefix + "redirect-url", "https://" + prefix + "redirect-uri"},
-		ClientSecretExpiresAt:     pointerx.Int64(0),
-		TokenEndpointAuthMethod:   pointerx.String("client_secret_basic"),
-		UserinfoSignedResponseAlg: pointerx.String("none"),
-		SubjectType:               pointerx.String("public"),
+		ClientSecretExpiresAt:     pointerx.Ptr[int64](0),
+		TokenEndpointAuthMethod:   pointerx.Ptr("client_secret_basic"),
+		UserinfoSignedResponseAlg: pointerx.Ptr("none"),
+		SubjectType:               pointerx.Ptr("public"),
 		Metadata:                  map[string]interface{}{"foo": "bar"},
 		// because these values are not nullable in the SQL schema, we have to set them not nil
 		AllowedCorsOrigins: []string{},
 		Audience:           []string{},
 		Jwks:               map[string]interface{}{},
+		SkipConsent:        pointerx.Ptr(false),
 	}
 }
 

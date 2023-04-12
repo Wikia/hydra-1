@@ -23,17 +23,15 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"github.com/pkg/errors"
 
-	jwt2 "github.com/ory/fosite/token/jwt"
-
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/token/jwt"
 	"github.com/ory/x/urlx"
 
-	"github.com/ory/hydra/client"
-	"github.com/ory/hydra/consent"
-	"github.com/ory/hydra/driver/config"
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/client"
+	"github.com/ory/hydra/v2/consent"
+	"github.com/ory/hydra/v2/driver/config"
+	"github.com/ory/hydra/v2/x"
 )
 
 const (
@@ -114,8 +112,8 @@ func (h *Handler) SetRoutes(admin *httprouterx.RouterAdmin, public *httprouterx.
 //	  302: emptyResponse
 func (h *Handler) performOidcFrontOrBackChannelLogout(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	ctx := r.Context()
-	handled, err := h.r.ConsentStrategy().HandleOpenIDConnectLogout(ctx, w, r)
 
+	handled, err := h.r.ConsentStrategy().HandleOpenIDConnectLogout(ctx, w, r)
 	if errors.Is(err, consent.ErrAbortOAuth2Request) {
 		return
 	} else if err != nil {
@@ -141,23 +139,40 @@ func (h *Handler) performOidcFrontOrBackChannelLogout(w http.ResponseWriter, r *
     var total = {{ len .FrontChannelLogoutURLs }};
     var redir = {{ .RedirectTo }};
 
+	var timeouts = [];
+	var redirected = false;
+	// Cancel all pending timeouts to avoid to call the frontchannel multiple times.
+	window.onbeforeunload = () => {
+		redirected = true;
+		for (var i=0; i<timeouts.length; i++) {
+			clearTimeout(timeouts[i]);
+		}
+		timeouts = [];
+	};
+	function setAndRegisterTimeout(fct, duration) {
+		if (redirected) {
+			return;
+		}
+		timeouts.push(setTimeout(fct, duration));
+	}
+
 	function redirect() {
 		window.location.replace(redir);
 
 		// In case replace failed try href
-		setTimeout(function () {
+		setAndRegisterTimeout(function () {
 			window.location.href = redir;
-		}, 250); // Show message after http-equiv="refresh"
+		}, 250);
 	}
 
     function done() {
         total--;
         if (total < 1) {
-			setTimeout(redirect, 500);
+			setAndRegisterTimeout(redirect, 500);
         }
     }
 
-	setTimeout(redirect, 7000); // redirect after 5 seconds if e.g. an iframe doesn't load
+	setAndRegisterTimeout(redirect, 7000); // redirect after 7 seconds if e.g. an iframe doesn't load
 
 	// If the redirect takes unusually long, show a message
 	setTimeout(function () {
@@ -589,7 +604,7 @@ func (h *Handler) getOidcUserInfo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		token, _, err := h.r.OpenIDJWTStrategy().Generate(ctx, jwt2.MapClaims(interim), &jwt.Headers{
+		token, _, err := h.r.OpenIDJWTStrategy().Generate(ctx, jwt.MapClaims(interim), &jwt.Headers{
 			Extra: map[string]interface{}{"kid": keyID},
 		})
 		if err != nil {
@@ -614,6 +629,10 @@ type revokeOAuth2Token struct {
 	// in: formData
 	// required: true
 	Token string `json:"token"`
+	// in: formData
+	ClientID string `json:"client_id"`
+	// in: formData
+	ClientSecret string `json:"client_secret"`
 }
 
 // swagger:route POST /oauth2/revoke oAuth2 revokeOAuth2Token
@@ -638,7 +657,7 @@ type revokeOAuth2Token struct {
 //	  200: emptyResponse
 //	  default: errorOAuth2
 func (h *Handler) revokeOAuth2Token(w http.ResponseWriter, r *http.Request) {
-	var ctx = r.Context()
+	ctx := r.Context()
 
 	err := h.r.OAuth2Provider().NewRevocationRequest(ctx, r)
 	if err != nil {
@@ -688,8 +707,8 @@ type introspectOAuth2Token struct {
 //	  200: introspectedOAuth2Token
 //	  default: errorOAuth2
 func (h *Handler) introspectOAuth2Token(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	var session = NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(r.Context()))
-	var ctx = r.Context()
+	session := NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(r.Context()))
+	ctx := r.Context()
 
 	if r.Method != "POST" {
 		err := errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("HTTP method is \"%s\", expected \"POST\".", r.Method))
@@ -860,7 +879,7 @@ func (h *Handler) oauth2TokenExchange(w http.ResponseWriter, r *http.Request) {
 
 	if accessRequest.GetGrantTypes().ExactOne("client_credentials") || accessRequest.GetGrantTypes().ExactOne("urn:ietf:params:oauth:grant-type:jwt-bearer") {
 		var accessTokenKeyID string
-		if h.c.AccessTokenStrategy(ctx) == "jwt" {
+		if h.c.AccessTokenStrategy(ctx, client.AccessTokenStrategySource(accessRequest.GetClient())) == "jwt" {
 			accessTokenKeyID, err = h.r.AccessTokenJWTStrategy().GetPublicKeyID(ctx)
 			if err != nil {
 				x.LogError(r, err, h.r.Logger())
@@ -936,7 +955,7 @@ func (h *Handler) oauth2TokenExchange(w http.ResponseWriter, r *http.Request) {
 //	  302: emptyResponse
 //	  default: errorOAuth2
 func (h *Handler) oAuth2Authorize(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	var ctx = r.Context()
+	ctx := r.Context()
 
 	authorizeRequest, err := h.r.OAuth2Provider().NewAuthorizeRequest(ctx, r)
 	if err != nil {
@@ -976,7 +995,7 @@ func (h *Handler) oAuth2Authorize(w http.ResponseWriter, r *http.Request, _ http
 	}
 
 	var accessTokenKeyID string
-	if h.c.AccessTokenStrategy(r.Context()) == "jwt" {
+	if h.c.AccessTokenStrategy(r.Context(), client.AccessTokenStrategySource(authorizeRequest.GetClient())) == "jwt" {
 		accessTokenKeyID, err = h.r.AccessTokenJWTStrategy().GetPublicKeyID(ctx)
 		if err != nil {
 			x.LogError(r, err, h.r.Logger())

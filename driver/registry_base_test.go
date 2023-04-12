@@ -9,6 +9,8 @@ import (
 	"io"
 	"testing"
 
+	"github.com/ory/x/randx"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/ory/x/httpx"
@@ -17,7 +19,7 @@ import (
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ory/hydra/driver/config"
+	"github.com/ory/hydra/v2/driver/config"
 	"github.com/ory/x/configx"
 	"github.com/ory/x/contextx"
 	"github.com/ory/x/logrusx"
@@ -79,9 +81,11 @@ func TestRegistryBase_CookieStore_MaxAgeZero(t *testing.T) {
 
 	ctx := context.Background()
 	r := new(RegistryBase)
-	r.WithConfig(config.MustNew(context.Background(), logrusx.New("", "")))
+	r.WithConfig(config.MustNew(context.Background(), logrusx.New("", ""), configx.WithValue(config.KeyGetSystemSecret, []string{randx.MustString(32, randx.AlphaNum)})))
 
-	cs := r.CookieStore(ctx).(*sessions.CookieStore)
+	s, err := r.CookieStore(ctx)
+	require.NoError(t, err)
+	cs := s.(*sessions.CookieStore)
 
 	assert.Equal(t, cs.Options.MaxAge, 0)
 }

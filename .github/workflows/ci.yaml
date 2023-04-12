@@ -86,6 +86,8 @@ jobs:
       - run: go list -json > go.list
       - name: Run nancy
         uses: sonatype-nexus-community/nancy-github-action@v1.0.2
+        with:
+          nancyVersion: v1.0.42
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v2
         env:
@@ -254,7 +256,7 @@ jobs:
     steps:
       - uses: ory/ci/releaser/render-version-schema@master
         with:
-          schema-path: spec/config.json
+          schema-path: .schema/config.schema.json
           token: ${{ secrets.ORY_BOT_PAT }}
 
   newsletter-draft:

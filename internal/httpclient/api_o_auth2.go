@@ -1768,11 +1768,12 @@ func (a *OAuth2ApiService) ListOAuth2ClientsExecute(r ApiListOAuth2ClientsReques
 }
 
 type ApiListOAuth2ConsentSessionsRequest struct {
-	ctx        context.Context
-	ApiService *OAuth2ApiService
-	subject    *string
-	pageSize   *int64
-	pageToken  *string
+	ctx            context.Context
+	ApiService     *OAuth2ApiService
+	subject        *string
+	pageSize       *int64
+	pageToken      *string
+	loginSessionId *string
 }
 
 // The subject to list the consent sessions for.
@@ -1790,6 +1791,12 @@ func (r ApiListOAuth2ConsentSessionsRequest) PageSize(pageSize int64) ApiListOAu
 // Next Page Token  The next page token. For details on pagination please head over to the [pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).
 func (r ApiListOAuth2ConsentSessionsRequest) PageToken(pageToken string) ApiListOAuth2ConsentSessionsRequest {
 	r.pageToken = &pageToken
+	return r
+}
+
+// The login session id to list the consent sessions for.
+func (r ApiListOAuth2ConsentSessionsRequest) LoginSessionId(loginSessionId string) ApiListOAuth2ConsentSessionsRequest {
+	r.loginSessionId = &loginSessionId
 	return r
 }
 
@@ -1846,6 +1853,9 @@ func (a *OAuth2ApiService) ListOAuth2ConsentSessionsExecute(r ApiListOAuth2Conse
 		localVarQueryParams.Add("page_token", parameterToString(*r.pageToken, ""))
 	}
 	localVarQueryParams.Add("subject", parameterToString(*r.subject, ""))
+	if r.loginSessionId != nil {
+		localVarQueryParams.Add("login_session_id", parameterToString(*r.loginSessionId, ""))
+	}
 	// to determine the Content-Type header
 	localVarHTTPContentTypes := []string{}
 
@@ -2960,6 +2970,7 @@ type ApiRevokeOAuth2LoginSessionsRequest struct {
 	ctx        context.Context
 	ApiService *OAuth2ApiService
 	subject    *string
+	sid        *string
 }
 
 // OAuth 2.0 Subject  The subject to revoke authentication sessions for.
@@ -2968,16 +2979,27 @@ func (r ApiRevokeOAuth2LoginSessionsRequest) Subject(subject string) ApiRevokeOA
 	return r
 }
 
+// OAuth 2.0 Subject  The subject to revoke authentication sessions for.
+func (r ApiRevokeOAuth2LoginSessionsRequest) Sid(sid string) ApiRevokeOAuth2LoginSessionsRequest {
+	r.sid = &sid
+	return r
+}
+
 func (r ApiRevokeOAuth2LoginSessionsRequest) Execute() (*http.Response, error) {
 	return r.ApiService.RevokeOAuth2LoginSessionsExecute(r)
 }
 
 /*
-RevokeOAuth2LoginSessions Revokes All OAuth 2.0 Login Sessions of a Subject
+RevokeOAuth2LoginSessions Revokes OAuth 2.0 Login Sessions by either a Subject or a SessionID
 
-This endpoint invalidates a subject's authentication session. After revoking the authentication session, the subject
-has to re-authenticate at the Ory OAuth2 Provider. This endpoint does not invalidate any tokens and
-does not work with OpenID Connect Front- or Back-channel logout.
+This endpoint invalidates authentication sessions. After revoking the authentication session(s), the subject
+has to re-authenticate at the Ory OAuth2 Provider. This endpoint does not invalidate any tokens.
+
+If you send the subject in a query param, all authentication sessions that belong to that subject are revoked.
+No OpennID Connect Front- or Back-channel logout is performed in this case.
+
+Alternatively, you can send a SessionID via `sid` query param, in which case, only the session that is connected
+to that SessionID is revoked. OpenID Connect Back-channel logout is performed in this case.
 
 	@param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
 	@return ApiRevokeOAuth2LoginSessionsRequest
@@ -3007,11 +3029,13 @@ func (a *OAuth2ApiService) RevokeOAuth2LoginSessionsExecute(r ApiRevokeOAuth2Log
 	localVarHeaderParams := make(map[string]string)
 	localVarQueryParams := url.Values{}
 	localVarFormParams := url.Values{}
-	if r.subject == nil {
-		return nil, reportError("subject is required and must be specified")
-	}
 
-	localVarQueryParams.Add("subject", parameterToString(*r.subject, ""))
+	if r.subject != nil {
+		localVarQueryParams.Add("subject", parameterToString(*r.subject, ""))
+	}
+	if r.sid != nil {
+		localVarQueryParams.Add("sid", parameterToString(*r.sid, ""))
+	}
 	// to determine the Content-Type header
 	localVarHTTPContentTypes := []string{}
 
@@ -3065,13 +3089,25 @@ func (a *OAuth2ApiService) RevokeOAuth2LoginSessionsExecute(r ApiRevokeOAuth2Log
 }
 
 type ApiRevokeOAuth2TokenRequest struct {
-	ctx        context.Context
-	ApiService *OAuth2ApiService
-	token      *string
+	ctx          context.Context
+	ApiService   *OAuth2ApiService
+	token        *string
+	clientId     *string
+	clientSecret *string
 }
 
 func (r ApiRevokeOAuth2TokenRequest) Token(token string) ApiRevokeOAuth2TokenRequest {
 	r.token = &token
+	return r
+}
+
+func (r ApiRevokeOAuth2TokenRequest) ClientId(clientId string) ApiRevokeOAuth2TokenRequest {
+	r.clientId = &clientId
+	return r
+}
+
+func (r ApiRevokeOAuth2TokenRequest) ClientSecret(clientSecret string) ApiRevokeOAuth2TokenRequest {
+	r.clientSecret = &clientSecret
 	return r
 }
 
@@ -3135,6 +3171,12 @@ func (a *OAuth2ApiService) RevokeOAuth2TokenExecute(r ApiRevokeOAuth2TokenReques
 	localVarHTTPHeaderAccept := selectHeaderAccept(localVarHTTPHeaderAccepts)
 	if localVarHTTPHeaderAccept != "" {
 		localVarHeaderParams["Accept"] = localVarHTTPHeaderAccept
+	}
+	if r.clientId != nil {
+		localVarFormParams.Add("client_id", parameterToString(*r.clientId, ""))
+	}
+	if r.clientSecret != nil {
+		localVarFormParams.Add("client_secret", parameterToString(*r.clientSecret, ""))
 	}
 	localVarFormParams.Add("token", parameterToString(*r.token, ""))
 	req, err := a.client.prepareRequest(r.ctx, localVarPath, localVarHTTPMethod, localVarPostBody, localVarHeaderParams, localVarQueryParams, localVarFormParams, formFiles)

@@ -13,8 +13,8 @@ import (
 	"github.com/ory/fosite"
 	"github.com/ory/x/sqlxx"
 
-	"github.com/ory/hydra/client"
-	"github.com/ory/hydra/consent"
+	"github.com/ory/hydra/v2/client"
+	"github.com/ory/hydra/v2/consent"
 )
 
 var _ consent.Strategy = new(consentMock)
@@ -46,6 +46,10 @@ func (c *consentMock) HandleOAuth2AuthorizationRequest(ctx context.Context, w ht
 }
 
 func (c *consentMock) HandleOpenIDConnectLogout(ctx context.Context, w http.ResponseWriter, r *http.Request) (*consent.LogoutResult, error) {
+	panic("not implemented")
+}
+
+func (c *consentMock) HandleHeadlessLogout(ctx context.Context, w http.ResponseWriter, r *http.Request, sid string) error {
 	panic("not implemented")
 }
 

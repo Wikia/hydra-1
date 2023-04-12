@@ -19,10 +19,10 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/ory/fosite"
-	"github.com/ory/hydra/client"
-	"github.com/ory/hydra/consent"
-	"github.com/ory/hydra/flow"
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/client"
+	"github.com/ory/hydra/v2/consent"
+	"github.com/ory/hydra/v2/flow"
+	"github.com/ory/hydra/v2/x"
 	"github.com/ory/x/sqlcon"
 )
 
@@ -448,6 +448,41 @@ consent_error='{}' AND
 nid = ?`, flow.FlowStateConsentUsed, flow.FlowStateConsentUnused,
 			)),
 			subject, p.NetworkID(ctx)).
+		Order("requested_at DESC").
+		Paginate(offset/limit+1, limit).
+		All(&fs); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errorsx.WithStack(consent.ErrNoPreviousConsentFound)
+		}
+		return nil, sqlcon.HandleError(err)
+	}
+
+	var rs []consent.AcceptOAuth2ConsentRequest
+	for _, f := range fs {
+		rs = append(rs, *f.GetHandledConsentRequest())
+	}
+
+	return p.filterExpiredConsentRequests(ctx, rs)
+}
+
+func (p *Persister) FindSubjectsSessionGrantedConsentRequests(ctx context.Context, subject, sid string, limit, offset int) ([]consent.AcceptOAuth2ConsentRequest, error) {
+	ctx, span := p.r.Tracer(ctx).Tracer().Start(ctx, "persistence.sql.FindSubjectsSessionGrantedConsentRequests")
+	defer span.End()
+
+	var fs []flow.Flow
+	c := p.Connection(ctx)
+
+	if err := c.
+		Where(
+			strings.TrimSpace(fmt.Sprintf(`
+(state = %d OR state = %d) AND
+subject = ? AND
+login_session_id = ? AND
+consent_skip=FALSE AND
+consent_error='{}' AND
+nid = ?`, flow.FlowStateConsentUsed, flow.FlowStateConsentUnused,
+			)),
+			subject, sid, p.NetworkID(ctx)).
 		Order("requested_at DESC").
 		Paginate(offset/limit+1, limit).
 		All(&fs); err != nil {

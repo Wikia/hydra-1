@@ -4,31 +4,34 @@
 package oauth2cors_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
-	"github.com/ory/hydra/driver"
-	"github.com/ory/hydra/x/oauth2cors"
+	"github.com/ory/hydra/v2/driver"
+	"github.com/ory/hydra/v2/x/oauth2cors"
 	"github.com/ory/x/contextx"
 
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/x"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ory/fosite"
-	"github.com/ory/hydra/client"
-	"github.com/ory/hydra/internal"
-	"github.com/ory/hydra/oauth2"
+	"github.com/ory/hydra/v2/client"
+	"github.com/ory/hydra/v2/internal"
+	"github.com/ory/hydra/v2/oauth2"
 )
 
 func TestOAuth2AwareCORSMiddleware(t *testing.T) {
 	r := internal.NewRegistryMemory(t, internal.NewConfigurationWithDefaults(), &contextx.Default{})
-	token, signature, _ := r.OAuth2HMACStrategy().GenerateAccessToken(nil, nil)
+	token, signature, _ := r.OAuth2HMACStrategy().GenerateAccessToken(context.Background(), nil)
 	for k, tc := range []struct {
 		prep         func(*testing.T, driver.Registry)
 		d            string
@@ -37,6 +40,7 @@ func TestOAuth2AwareCORSMiddleware(t *testing.T) {
 		header       http.Header
 		expectHeader http.Header
 		method       string
+		body         io.Reader
 	}{
 		{
 			d:            "should ignore when disabled",
@@ -54,6 +58,36 @@ func TestOAuth2AwareCORSMiddleware(t *testing.T) {
 			code:         http.StatusNotImplemented,
 			header:       http.Header{"Origin": {"http://foobar.com"}, "Authorization": {fmt.Sprintf("Basic %s", x.BasicAuth("foo", "bar"))}},
 			expectHeader: http.Header{"Vary": {"Origin"}},
+		},
+		{
+			d: "should reject when post auth client exists but origin not allowed",
+			prep: func(t *testing.T, r driver.Registry) {
+				r.Config().MustSet(context.Background(), "serve.public.cors.enabled", true)
+				r.Config().MustSet(context.Background(), "serve.public.cors.allowed_origins", []string{"http://not-test-domain.com"})
+
+				// Ignore unique violations
+				_ = r.ClientManager().CreateClient(context.Background(), &client.Client{LegacyClientID: "foo-2", Secret: "bar", AllowedCORSOrigins: []string{"http://not-foobar.com"}})
+			},
+			code:         http.StatusNotImplemented,
+			header:       http.Header{"Origin": {"http://foobar.com"}, "Content-Type": {"application/x-www-form-urlencoded"}},
+			expectHeader: http.Header{"Vary": {"Origin"}},
+			method:       http.MethodPost,
+			body:         bytes.NewBufferString(url.Values{"client_id": []string{"foo-2"}}.Encode()),
+		},
+		{
+			d: "should accept when post auth client exists and origin allowed",
+			prep: func(t *testing.T, r driver.Registry) {
+				r.Config().MustSet(context.Background(), "serve.public.cors.enabled", true)
+				r.Config().MustSet(context.Background(), "serve.public.cors.allowed_origins", []string{"http://not-test-domain.com"})
+
+				// Ignore unique violations
+				_ = r.ClientManager().CreateClient(context.Background(), &client.Client{LegacyClientID: "foo-3", Secret: "bar", AllowedCORSOrigins: []string{"http://foobar.com"}})
+			},
+			code:         http.StatusNotImplemented,
+			header:       http.Header{"Origin": {"http://foobar.com"}, "Content-Type": {"application/x-www-form-urlencoded"}},
+			expectHeader: http.Header{"Access-Control-Allow-Credentials": []string{"true"}, "Access-Control-Allow-Origin": []string{"http://foobar.com"}, "Access-Control-Expose-Headers": []string{"Cache-Control, Expires, Last-Modified, Pragma, Content-Length, Content-Language, Content-Type"}, "Vary": []string{"Origin"}},
+			method:       http.MethodPost,
+			body:         bytes.NewBufferString(url.Values{"client_id": {"foo-3"}}.Encode()),
 		},
 		{
 			d: "should reject when basic auth client exists but origin not allowed",
@@ -237,7 +271,7 @@ func TestOAuth2AwareCORSMiddleware(t *testing.T) {
 			if tc.method != "" {
 				method = tc.method
 			}
-			req, err := http.NewRequest(method, "http://foobar.com/", nil)
+			req, err := http.NewRequest(method, "http://foobar.com/", tc.body)
 			require.NoError(t, err)
 			for k := range tc.header {
 				req.Header.Set(k, tc.header.Get(k))

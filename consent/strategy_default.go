@@ -12,33 +12,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/twmb/murmur3"
-
-	"github.com/ory/hydra/driver/config"
-
-	"github.com/ory/x/errorsx"
-
-	"github.com/ory/x/sqlcon"
-
 	"github.com/gorilla/sessions"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-
-	jwtgo "github.com/ory/fosite/token/jwt"
-
-	"github.com/ory/x/sqlxx"
+	"github.com/twmb/murmur3"
 
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/token/jwt"
+	"github.com/ory/hydra/v2/client"
+	"github.com/ory/hydra/v2/driver/config"
+	"github.com/ory/hydra/v2/x"
+	"github.com/ory/x/errorsx"
 	"github.com/ory/x/mapx"
+	"github.com/ory/x/sqlcon"
+	"github.com/ory/x/sqlxx"
 	"github.com/ory/x/stringslice"
 	"github.com/ory/x/stringsx"
 	"github.com/ory/x/urlx"
-
-	"github.com/ory/hydra/client"
-	"github.com/ory/hydra/x"
 )
 
 const (
@@ -88,8 +80,13 @@ func (s *DefaultStrategy) matchesValueFromSession(ctx context.Context, c fosite.
 }
 
 func (s *DefaultStrategy) authenticationSession(ctx context.Context, w http.ResponseWriter, r *http.Request) (*LoginSession, error) {
+	store, err := s.r.CookieStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// We try to open the session cookie. If it does not exist (indicated by the error), we must authenticate the user.
-	cookie, err := s.r.CookieStore(ctx).Get(r, s.c.SessionCookieName(ctx))
+	cookie, err := store.Get(r, s.c.SessionCookieName(ctx))
 	if err != nil {
 		s.r.Logger().
 			WithRequest(r).
@@ -163,9 +160,9 @@ func (s *DefaultStrategy) requestAuthentication(ctx context.Context, w http.Resp
 	return s.forwardAuthenticationRequest(ctx, w, r, ar, session.Subject, time.Time(session.AuthenticatedAt), session)
 }
 
-func (s *DefaultStrategy) getIDTokenHintClaims(ctx context.Context, idTokenHint string) (jwtgo.MapClaims, error) {
+func (s *DefaultStrategy) getIDTokenHintClaims(ctx context.Context, idTokenHint string) (jwt.MapClaims, error) {
 	token, err := s.r.OpenIDJWTStrategy().Decode(ctx, idTokenHint)
-	if ve := new(jwtgo.ValidationError); errors.As(err, &ve) && ve.Errors == jwtgo.ValidationErrorExpired {
+	if ve := new(jwt.ValidationError); errors.As(err, &ve) && ve.Errors == jwt.ValidationErrorExpired {
 		// Expired is ok
 	} else if err != nil {
 		return nil, errorsx.WithStack(fosite.ErrInvalidRequest.WithHint(err.Error()))
@@ -212,7 +209,7 @@ func (s *DefaultStrategy) forwardAuthenticationRequest(ctx context.Context, w ht
 	iu := s.c.OAuth2AuthURL(ctx)
 	iu.RawQuery = r.URL.RawQuery
 
-	var idTokenHintClaims jwtgo.MapClaims
+	var idTokenHintClaims jwt.MapClaims
 	if idTokenHint := ar.GetRequestForm().Get("id_token_hint"); len(idTokenHint) > 0 {
 		claims, err := s.getIDTokenHintClaims(r.Context(), idTokenHint)
 		if err != nil {
@@ -261,8 +258,13 @@ func (s *DefaultStrategy) forwardAuthenticationRequest(ctx context.Context, w ht
 		return errorsx.WithStack(err)
 	}
 
+	store, err := s.r.CookieStore(ctx)
+	if err != nil {
+		return err
+	}
+
 	clientSpecificCookieNameLoginCSRF := fmt.Sprintf("%s_%d", s.r.Config().CookieNameLoginCSRF(ctx), murmur3.Sum32(cl.ID.Bytes()))
-	if err := createCsrfSession(w, r, s.r.Config(), s.r.CookieStore(ctx), clientSpecificCookieNameLoginCSRF, csrf, s.c.ConsentRequestMaxAge(ctx)); err != nil {
+	if err := createCsrfSession(w, r, s.r.Config(), store, clientSpecificCookieNameLoginCSRF, csrf, s.c.ConsentRequestMaxAge(ctx)); err != nil {
 		return errorsx.WithStack(err)
 	}
 
@@ -273,7 +275,12 @@ func (s *DefaultStrategy) forwardAuthenticationRequest(ctx context.Context, w ht
 }
 
 func (s *DefaultStrategy) revokeAuthenticationSession(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	sid, err := s.revokeAuthenticationCookie(w, r, s.r.CookieStore(ctx))
+	store, err := s.r.CookieStore(ctx)
+	if err != nil {
+		return err
+	}
+
+	sid, err := s.revokeAuthenticationCookie(w, r, store)
 	if err != nil {
 		return err
 	}
@@ -292,7 +299,7 @@ func (s *DefaultStrategy) revokeAuthenticationCookie(w http.ResponseWriter, r *h
 
 	cookie.Values[CookieAuthenticationSIDName] = ""
 	cookie.Options.HttpOnly = true
-	cookie.Options.Path = "/"
+	cookie.Options.Path = s.c.SessionCookiePath(ctx)
 	cookie.Options.SameSite = s.c.CookieSameSiteMode(ctx)
 	cookie.Options.Secure = s.c.CookieSecure(ctx)
 	cookie.Options.Domain = s.c.CookieDomain(ctx)
@@ -323,8 +330,13 @@ func (s *DefaultStrategy) verifyAuthentication(w http.ResponseWriter, r *http.Re
 		return nil, errorsx.WithStack(fosite.ErrRequestUnauthorized.WithHint("The login request has expired. Please try again."))
 	}
 
+	store, err := s.r.CookieStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	clientSpecificCookieNameLoginCSRF := fmt.Sprintf("%s_%d", s.r.Config().CookieNameLoginCSRF(ctx), murmur3.Sum32(session.LoginRequest.Client.ID.Bytes()))
-	if err := validateCsrfSession(r, s.r.Config(), s.r.CookieStore(ctx), clientSpecificCookieNameLoginCSRF, session.LoginRequest.CSRF); err != nil {
+	if err := validateCsrfSession(r, s.r.Config(), store, clientSpecificCookieNameLoginCSRF, session.LoginRequest.CSRF); err != nil {
 		return nil, err
 	}
 
@@ -413,7 +425,7 @@ func (s *DefaultStrategy) verifyAuthentication(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	if !session.Remember || session.LoginRequest.Skip {
+	if !session.Remember || session.LoginRequest.Skip && !session.ExtendSessionLifespan {
 		// If the user doesn't want to remember the session, we do not store a cookie.
 		// If login was skipped, it means an authentication cookie was present and
 		// we don't want to touch it (in order to preserve its original expiry date)
@@ -421,13 +433,13 @@ func (s *DefaultStrategy) verifyAuthentication(w http.ResponseWriter, r *http.Re
 	}
 
 	// Not a skipped login and the user asked to remember its session, store a cookie
-	cookie, _ := s.r.CookieStore(ctx).Get(r, s.c.SessionCookieName(ctx))
+	cookie, _ := store.Get(r, s.c.SessionCookieName(ctx))
 	cookie.Values[CookieAuthenticationSIDName] = sessionID
 	if session.RememberFor >= 0 {
 		cookie.Options.MaxAge = session.RememberFor
 	}
 	cookie.Options.HttpOnly = true
-	cookie.Options.Path = "/"
+	cookie.Options.Path = s.c.SessionCookiePath(ctx)
 	cookie.Options.SameSite = s.c.CookieSameSiteMode(ctx)
 	cookie.Options.Secure = s.c.CookieSecure(ctx)
 	if err := cookie.Save(r, w); err != nil {
@@ -539,8 +551,13 @@ func (s *DefaultStrategy) forwardConsentRequest(ctx context.Context, w http.Resp
 		return errorsx.WithStack(err)
 	}
 
+	store, err := s.r.CookieStore(ctx)
+	if err != nil {
+		return err
+	}
+
 	clientSpecificCookieNameConsentCSRF := fmt.Sprintf("%s_%d", s.r.Config().CookieNameConsentCSRF(ctx), murmur3.Sum32(cl.ID.Bytes()))
-	if err := createCsrfSession(w, r, s.r.Config(), s.r.CookieStore(ctx), clientSpecificCookieNameConsentCSRF, csrf, s.c.ConsentRequestMaxAge(ctx)); err != nil {
+	if err := createCsrfSession(w, r, s.r.Config(), store, clientSpecificCookieNameConsentCSRF, csrf, s.c.ConsentRequestMaxAge(ctx)); err != nil {
 		return errorsx.WithStack(err)
 	}
 
@@ -575,8 +592,13 @@ func (s *DefaultStrategy) verifyConsent(ctx context.Context, w http.ResponseWrit
 		return nil, errorsx.WithStack(fosite.ErrServerError.WithHint("The authenticatedAt value was not set."))
 	}
 
+	store, err := s.r.CookieStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	clientSpecificCookieNameConsentCSRF := fmt.Sprintf("%s_%d", s.r.Config().CookieNameConsentCSRF(ctx), murmur3.Sum32(session.ConsentRequest.Client.ID.Bytes()))
-	if err := validateCsrfSession(r, s.r.Config(), s.r.CookieStore(ctx), clientSpecificCookieNameConsentCSRF, session.ConsentRequest.CSRF); err != nil {
+	if err := validateCsrfSession(r, s.r.Config(), store, clientSpecificCookieNameConsentCSRF, session.ConsentRequest.CSRF); err != nil {
 		return nil, err
 	}
 
@@ -644,7 +666,7 @@ func (s *DefaultStrategy) executeBackChannelLogout(ctx context.Context, r *http.
 		// s.r.ConsentManager().GetForcedObfuscatedLoginSession(context.Background(), subject, <missing>)
 		// sub := s.obfuscateSubjectIdentifier(c, subject, )
 
-		t, _, err := s.r.OpenIDJWTStrategy().Generate(ctx, jwtgo.MapClaims{
+		t, _, err := s.r.OpenIDJWTStrategy().Generate(ctx, jwt.MapClaims{
 			"iss":    s.c.IssuerURL(ctx).String(),
 			"aud":    []string{c.LegacyClientID},
 			"iat":    time.Now().UTC().Unix(),
@@ -877,6 +899,25 @@ func (s *DefaultStrategy) issueLogoutVerifier(ctx context.Context, w http.Respon
 	return nil, errorsx.WithStack(ErrAbortOAuth2Request)
 }
 
+func (s *DefaultStrategy) performBackChannelLogoutAndDeleteSession(ctx context.Context, r *http.Request, subject string, sid string) error {
+	if err := s.executeBackChannelLogout(r.Context(), r, subject, sid); err != nil {
+		return err
+	}
+
+	// We delete the session after back channel log out has worked as the session is otherwise removed
+	// from the store which will break the query for finding all the channels.
+	//
+	// executeBackChannelLogout only fails on system errors so not on URL errors, so this should be fine
+	// even if an upstream URL fails!
+	if err := s.r.ConsentManager().DeleteLoginSession(r.Context(), sid); errors.Is(err, sqlcon.ErrNoRows) {
+		// This is ok (session probably already revoked), do nothing!
+	} else if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *DefaultStrategy) completeLogout(ctx context.Context, w http.ResponseWriter, r *http.Request) (*LogoutResult, error) {
 	verifier := r.URL.Query().Get("logout_verifier")
 
@@ -914,25 +955,19 @@ func (s *DefaultStrategy) completeLogout(ctx context.Context, w http.ResponseWri
 		}
 	}
 
-	_, _ = s.revokeAuthenticationCookie(w, r, s.r.CookieStore(ctx)) // Cookie removal is optional
+	store, err := s.r.CookieStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	_, _ = s.revokeAuthenticationCookie(w, r, store) // Cookie removal is optional
 
 	urls, err := s.generateFrontChannelLogoutURLs(r.Context(), lr.Subject, lr.SessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.executeBackChannelLogout(r.Context(), r, lr.Subject, lr.SessionID); err != nil {
-		return nil, err
-	}
-
-	// We delete the session after back channel log out has worked as the session is otherwise removed
-	// from the store which will break the query for finding all the channels.
-	//
-	// executeBackChannelLogout only fails on system errors so not on URL errors, so this should be fine
-	// even if an upstream URL fails!
-	if err := s.r.ConsentManager().DeleteLoginSession(r.Context(), lr.SessionID); errors.Is(err, sqlcon.ErrNoRows) {
-		// This is ok (session probably already revoked), do nothing!
-	} else if err != nil {
+	if err := s.performBackChannelLogoutAndDeleteSession(r.Context(), r, lr.Subject, lr.SessionID); err != nil {
 		return nil, err
 	}
 
@@ -954,6 +989,31 @@ func (s *DefaultStrategy) HandleOpenIDConnectLogout(ctx context.Context, w http.
 	}
 
 	return s.completeLogout(ctx, w, r)
+}
+
+func (s *DefaultStrategy) HandleHeadlessLogout(ctx context.Context, w http.ResponseWriter, r *http.Request, sid string) error {
+	loginSession, lsErr := s.r.ConsentManager().GetRememberedLoginSession(ctx, sid)
+
+	if errors.Is(lsErr, x.ErrNotFound) {
+		// This is ok (session probably already revoked), do nothing!
+		// Not triggering the back-channel logout because subject is not available
+		// See https://github.com/ory/hydra/pull/3450#discussion_r1127798485
+		return nil
+	} else if lsErr != nil {
+		return lsErr
+	}
+
+	if err := s.performBackChannelLogoutAndDeleteSession(r.Context(), r, loginSession.Subject, sid); err != nil {
+		return err
+	}
+
+	s.r.AuditLogger().
+		WithRequest(r).
+		WithField("subject", loginSession.Subject).
+		WithField("sid", sid).
+		Info("User logout completed via headless flow!")
+
+	return nil
 }
 
 func (s *DefaultStrategy) HandleOAuth2AuthorizationRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, req fosite.AuthorizeRequester) (*AcceptOAuth2ConsentRequest, error) {

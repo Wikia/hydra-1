@@ -17,8 +17,8 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/ory/fosite"
-	"github.com/ory/hydra/driver/config"
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/driver/config"
+	"github.com/ory/hydra/v2/x"
 	"github.com/ory/x/errorsx"
 	"github.com/ory/x/sqlxx"
 	"github.com/ory/x/stringsx"
@@ -149,6 +149,12 @@ type listOAuth2ConsentSessions struct {
 	// in: query
 	// required: true
 	Subject string `json:"subject"`
+
+	// The login session id to list the consent sessions for.
+	//
+	// in: query
+	// required: false
+	LoginSessionId string `json:"login_session_id"`
 }
 
 // swagger:route GET /admin/oauth2/auth/sessions/consent oAuth2 listOAuth2ConsentSessions
@@ -176,9 +182,17 @@ func (h *Handler) listOAuth2ConsentSessions(w http.ResponseWriter, r *http.Reque
 		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHint(`Query parameter 'subject' is not defined but should have been.`)))
 		return
 	}
+	loginSessionId := r.URL.Query().Get("login_session_id")
 
 	page, itemsPerPage := x.ParsePagination(r)
-	s, err := h.r.ConsentManager().FindSubjectsGrantedConsentRequests(r.Context(), subject, itemsPerPage, itemsPerPage*page)
+
+	var s []AcceptOAuth2ConsentRequest
+	var err error
+	if len(loginSessionId) == 0 {
+		s, err = h.r.ConsentManager().FindSubjectsGrantedConsentRequests(r.Context(), subject, itemsPerPage, itemsPerPage*page)
+	} else {
+		s, err = h.r.ConsentManager().FindSubjectsSessionGrantedConsentRequests(r.Context(), subject, loginSessionId, itemsPerPage, itemsPerPage*page)
+	}
 	if errors.Is(err, ErrNoPreviousConsentFound) {
 		h.r.Writer().Write(w, r, []OAuth2ConsentSession{})
 		return
@@ -216,17 +230,28 @@ type revokeOAuth2LoginSessions struct {
 	// The subject to revoke authentication sessions for.
 	//
 	// in: query
-	// required: true
 	Subject string `json:"subject"`
+
+	// OAuth 2.0 Subject
+	//
+	// The subject to revoke authentication sessions for.
+	//
+	// in: query
+	SessionID string `json:"sid"`
 }
 
 // swagger:route DELETE /admin/oauth2/auth/sessions/login oAuth2 revokeOAuth2LoginSessions
 //
-// # Revokes All OAuth 2.0 Login Sessions of a Subject
+// # Revokes OAuth 2.0 Login Sessions by either a Subject or a SessionID
 //
-// This endpoint invalidates a subject's authentication session. After revoking the authentication session, the subject
-// has to re-authenticate at the Ory OAuth2 Provider. This endpoint does not invalidate any tokens and
-// does not work with OpenID Connect Front- or Back-channel logout.
+// This endpoint invalidates authentication sessions. After revoking the authentication session(s), the subject
+// has to re-authenticate at the Ory OAuth2 Provider. This endpoint does not invalidate any tokens.
+//
+// If you send the subject in a query param, all authentication sessions that belong to that subject are revoked.
+// No OpennID Connect Front- or Back-channel logout is performed in this case.
+//
+// Alternatively, you can send a SessionID via `sid` query param, in which case, only the session that is connected
+// to that SessionID is revoked. OpenID Connect Back-channel logout is performed in this case.
 //
 //	Consumes:
 //	- application/json
@@ -240,9 +265,21 @@ type revokeOAuth2LoginSessions struct {
 //	  204: emptyResponse
 //	  default: errorOAuth2
 func (h *Handler) revokeOAuth2LoginSessions(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	sid := r.URL.Query().Get("sid")
 	subject := r.URL.Query().Get("subject")
-	if subject == "" {
-		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHint(`Query parameter 'subject' is not defined but should have been.`)))
+
+	if sid == "" && subject == "" {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHint(`Either 'subject' or 'sid' query parameters need to be defined.`)))
+		return
+	}
+
+	if sid != "" {
+		if err := h.r.ConsentStrategy().HandleHeadlessLogout(r.Context(), w, r, sid); err != nil {
+			h.r.Writer().WriteError(w, r, err)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 

@@ -21,8 +21,8 @@ import (
 
 	"github.com/ory/fosite"
 
-	"github.com/ory/hydra/client"
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/client"
+	"github.com/ory/hydra/v2/x"
 )
 
 func MockConsentRequest(key string, remember bool, rememberFor int, hasError bool, skip bool, authAt bool, loginChallengeBase string, network string) (c *OAuth2ConsentRequest, h *AcceptOAuth2ConsentRequest) {
@@ -247,7 +247,7 @@ func makeID(base string, network string, key string) string {
 }
 
 func TestHelperNID(t1ClientManager client.Manager, t1ValidNID Manager, t2InvalidNID Manager) func(t *testing.T) {
-	testClient := client.Client{LegacyClientID: fmt.Sprintf("2022-03-11-client-nid-test-1")}
+	testClient := client.Client{LegacyClientID: "2022-03-11-client-nid-test-1"}
 	testLS := LoginSession{
 		ID:      "2022-03-11-ls-nid-test-1",
 		Subject: "2022-03-11-test-1-sub",
@@ -257,7 +257,7 @@ func TestHelperNID(t1ClientManager client.Manager, t1ValidNID Manager, t2Invalid
 		Subject:     "2022-03-11-test-1-sub",
 		Verifier:    "2022-03-11-test-1-ver",
 		RequestedAt: time.Now(),
-		Client:      &client.Client{LegacyClientID: fmt.Sprintf("2022-03-11-client-nid-test-1")},
+		Client:      &client.Client{LegacyClientID: "2022-03-11-client-nid-test-1"},
 	}
 	testHLR := HandledLoginRequest{
 		LoginRequest:           &testLR,
@@ -314,6 +314,7 @@ func ManagerTests(m Manager, clientManager client.Manager, fositeManager x.Fosit
 				lr[k] = &LoginRequest{
 					ID:              makeID("fk-login-challenge", network, k),
 					Subject:         fmt.Sprintf("subject%s", k),
+					SessionID:       sqlxx.NullString(makeID("fk-login-session", network, k)),
 					Verifier:        makeID("fk-login-verifier", network, k),
 					Client:          &client.Client{LegacyClientID: fmt.Sprintf("fk-client-%s", k)},
 					AuthenticatedAt: sqlxx.NullTime(time.Now()),
@@ -667,6 +668,52 @@ func ManagerTests(m Manager, clientManager client.Manager, fositeManager x.Fosit
 			require.NoError(t, err)
 			_, err = m.HandleConsentRequest(context.Background(), hcr2)
 			require.NoError(t, err)
+
+			for i, tc := range []struct {
+				subject    string
+				sid        string
+				challenges []string
+				clients    []string
+			}{
+				{
+					subject:    cr1.Subject,
+					sid:        makeID("fk-login-session", network, "rv1"),
+					challenges: []string{challengerv1},
+					clients:    []string{"fk-client-rv1"},
+				},
+				{
+					subject:    cr2.Subject,
+					sid:        makeID("fk-login-session", network, "rv2"),
+					challenges: []string{challengerv2},
+					clients:    []string{"fk-client-rv2"},
+				},
+				{
+					subject:    "subjectrv3",
+					sid:        makeID("fk-login-session", network, "rv2"),
+					challenges: []string{},
+					clients:    []string{},
+				},
+			} {
+				t.Run(fmt.Sprintf("case=%d/subject=%s/session=%s", i, tc.subject, tc.sid), func(t *testing.T) {
+					consents, err := m.FindSubjectsSessionGrantedConsentRequests(context.Background(), tc.subject, tc.sid, 100, 0)
+					assert.Equal(t, len(tc.challenges), len(consents))
+
+					if len(tc.challenges) == 0 {
+						assert.EqualError(t, err, ErrNoPreviousConsentFound.Error())
+					} else {
+						require.NoError(t, err)
+						for _, consent := range consents {
+							assert.Contains(t, tc.challenges, consent.ID)
+							assert.Contains(t, tc.clients, consent.ConsentRequest.Client.GetID())
+						}
+					}
+
+					n, err := m.CountSubjectsGrantedConsentRequests(context.Background(), tc.subject)
+					require.NoError(t, err)
+					assert.Equal(t, n, len(tc.challenges))
+
+				})
+			}
 
 			for i, tc := range []struct {
 				subject    string

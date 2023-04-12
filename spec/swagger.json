@@ -1204,6 +1204,12 @@
             "name": "subject",
             "in": "query",
             "required": true
+          },
+          {
+            "type": "string",
+            "description": "The login session id to list the consent sessions for.",
+            "name": "login_session_id",
+            "in": "query"
           }
         ],
         "responses": {
@@ -1274,7 +1280,7 @@
     },
     "/admin/oauth2/auth/sessions/login": {
       "delete": {
-        "description": "This endpoint invalidates a subject's authentication session. After revoking the authentication session, the subject\nhas to re-authenticate at the Ory OAuth2 Provider. This endpoint does not invalidate any tokens and\ndoes not work with OpenID Connect Front- or Back-channel logout.",
+        "description": "This endpoint invalidates authentication sessions. After revoking the authentication session(s), the subject\nhas to re-authenticate at the Ory OAuth2 Provider. This endpoint does not invalidate any tokens.\n\nIf you send the subject in a query param, all authentication sessions that belong to that subject are revoked.\nNo OpennID Connect Front- or Back-channel logout is performed in this case.\n\nAlternatively, you can send a SessionID via `sid` query param, in which case, only the session that is connected\nto that SessionID is revoked. OpenID Connect Back-channel logout is performed in this case.",
         "consumes": [
           "application/json"
         ],
@@ -1288,15 +1294,20 @@
         "tags": [
           "oAuth2"
         ],
-        "summary": "Revokes All OAuth 2.0 Login Sessions of a Subject",
+        "summary": "Revokes OAuth 2.0 Login Sessions by either a Subject or a SessionID",
         "operationId": "revokeOAuth2LoginSessions",
         "parameters": [
           {
             "type": "string",
             "description": "OAuth 2.0 Subject\n\nThe subject to revoke authentication sessions for.",
             "name": "subject",
-            "in": "query",
-            "required": true
+            "in": "query"
+          },
+          {
+            "type": "string",
+            "description": "OAuth 2.0 Subject\n\nThe subject to revoke authentication sessions for.",
+            "name": "sid",
+            "in": "query"
           }
         ],
         "responses": {
@@ -1870,6 +1881,16 @@
             "name": "token",
             "in": "formData",
             "required": true
+          },
+          {
+            "type": "string",
+            "name": "client_id",
+            "in": "formData"
+          },
+          {
+            "type": "string",
+            "name": "client_secret",
+            "in": "formData"
           }
         ],
         "responses": {
@@ -2108,6 +2129,10 @@
         },
         "context": {
           "$ref": "#/definitions/JSONRawMessage"
+        },
+        "extend_session_lifespan": {
+          "description": "Extend OAuth2 authentication session lifespan\n\nIf set to `true`, the OAuth2 authentication cookie lifespan is extended. This is for example useful if you want the user to be able to use `prompt=none` continuously.\n\nThis value can only be set to `true` if the user has an authentication, which is the case if the `skip` value is `true`.",
+          "type": "boolean"
         },
         "force_subject_identifier": {
           "description": "ForceSubjectIdentifier forces the \"pairwise\" user ID of the end-user that authenticated. The \"pairwise\" user ID refers to the\n(Pairwise Identifier Algorithm)[http://openid.net/specs/openid-connect-core-1_0.html#PairwiseAlg] of the OpenID\nConnect specification. It allows you to set an obfuscated subject (\"user\") identifier that is unique to the client.\n\nPlease note that this changes the user ID on endpoint /userinfo and sub claim of the ID Token. It does not change the\nsub claim in the OAuth 2.0 Introspection.\n\nPer default, ORY Hydra handles this value with its own algorithm. In case you want to set this yourself\nyou can use this field. Please note that setting this field has no effect if `pairwise` is not configured in\nORY Hydra or the OAuth 2.0 Client does not expect a pairwise identifier (set via `subject_type` key in the client's\nconfiguration).\n\nPlease also be aware that ORY Hydra is unable to properly compute this value during authentication. This implies\nthat you have to compute this value on every authentication process (probably depending on the client ID or some\nother unique value).\n\nIf you fail to compute the proper value, then authentication processes which have id_token_hint set might fail.",
@@ -2466,6 +2491,10 @@
       "type": "object",
       "title": "OAuth 2.0 Client",
       "properties": {
+        "access_token_strategy": {
+          "description": "OAuth 2.0 Access Token Strategy\n\nAccessTokenStrategy is the strategy used to generate access tokens.\nValid options are `jwt` and `opaque`. `jwt` is a bad idea, see https://www.ory.sh/docs/hydra/advanced#json-web-tokens\nSetting the stragegy here overrides the global setting in `strategies.access_token`.",
+          "type": "string"
+        },
         "allowed_cors_origins": {
           "$ref": "#/definitions/StringSliceJSONFormat"
         },
@@ -2605,13 +2634,18 @@
           "description": "OpenID Connect Sector Identifier URI\n\nURL using the https scheme to be used in calculating Pseudonymous Identifiers by the OP. The URL references a\nfile with a single JSON array of redirect_uri values.",
           "type": "string"
         },
+        "skip_consent": {
+          "description": "SkipConsent skips the consent screen for this client. This field can only\nbe set from the admin API.",
+          "type": "boolean"
+        },
         "subject_type": {
           "description": "OpenID Connect Subject Type\n\nThe `subject_types_supported` Discovery parameter contains a\nlist of the supported subject_type values for this server. Valid types include `pairwise` and `public`.",
           "type": "string"
         },
         "token_endpoint_auth_method": {
-          "description": "OAuth 2.0 Token Endpoint Authentication Method\n\nRequested Client Authentication method for the Token Endpoint. The options are:\n\n`client_secret_post`: (default) Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` in the HTTP body.\n`client_secret_basic`: Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` encoded in the HTTP Authorization header.\n`private_key_jwt`: Use JSON Web Tokens to authenticate the client.\n`none`: Used for public clients (native apps, mobile apps) which can not have secrets.",
-          "type": "string"
+          "description": "OAuth 2.0 Token Endpoint Authentication Method\n\nRequested Client Authentication method for the Token Endpoint. The options are:\n\n`client_secret_basic`: (default) Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` encoded in the HTTP Authorization header.\n`client_secret_post`: Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` in the HTTP body.\n`private_key_jwt`: Use JSON Web Tokens to authenticate the client.\n`none`: Used for public clients (native apps, mobile apps) which can not have secrets.",
+          "type": "string",
+          "default": "client_secret_basic"
         },
         "token_endpoint_auth_signing_alg": {
           "description": "OAuth 2.0 Token Endpoint Signing Algorithm\n\nRequested Client Authentication signing algorithm for the Token Endpoint.",
@@ -3270,7 +3304,7 @@
       }
     },
     "tokenPaginationRequestParameters": {
-      "description": "The `Link` HTTP header contains multiple links (`first`, `next`, `last`, `previous`) formatted as:\n`\u003chttps://{project-slug}.projects.oryapis.com/admin/clients?limit={limit}\u0026offset={offset}\u003e; rel=\"{page}\"`\n\nFor details on pagination please head over to the [pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).",
+      "description": "The `Link` HTTP header contains multiple links (`first`, `next`, `last`, `previous`) formatted as:\n`\u003chttps://{project-slug}.projects.oryapis.com/admin/clients?page_size={limit}\u0026page_token={offset}\u003e; rel=\"{page}\"`\n\nFor details on pagination please head over to the [pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).",
       "type": "object",
       "title": "Pagination Request Parameters",
       "properties": {
@@ -3291,12 +3325,12 @@
       }
     },
     "tokenPaginationResponseHeaders": {
-      "description": "The `Link` HTTP header contains multiple links (`first`, `next`, `last`, `previous`) formatted as:\n`\u003chttps://{project-slug}.projects.oryapis.com/admin/clients?limit={limit}\u0026offset={offset}\u003e; rel=\"{page}\"`\n\nFor details on pagination please head over to the [pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).",
+      "description": "The `Link` HTTP header contains multiple links (`first`, `next`, `last`, `previous`) formatted as:\n`\u003chttps://{project-slug}.projects.oryapis.com/admin/clients?page_size={limit}\u0026page_token={offset}\u003e; rel=\"{page}\"`\n\nFor details on pagination please head over to the [pagination documentation](https://www.ory.sh/docs/ecosystem/api-design#pagination).",
       "type": "object",
       "title": "Pagination Response Header",
       "properties": {
         "link": {
-          "description": "The Link HTTP Header\n\nThe `Link` header contains a comma-delimited list of links to the following pages:\n\nfirst: The first page of results.\nnext: The next page of results.\nprev: The previous page of results.\nlast: The last page of results.\n\nPages are omitted if they do not exist. For example, if there is no next page, the `next` link is omitted. Examples:\n\n\u003c/clients?limit=5\u0026offset=0\u003e; rel=\"first\",\u003c/clients?limit=5\u0026offset=15\u003e; rel=\"next\",\u003c/clients?limit=5\u0026offset=5\u003e; rel=\"prev\",\u003c/clients?limit=5\u0026offset=20\u003e; rel=\"last\"",
+          "description": "The Link HTTP Header\n\nThe `Link` header contains a comma-delimited list of links to the following pages:\n\nfirst: The first page of results.\nnext: The next page of results.\nprev: The previous page of results.\nlast: The last page of results.\n\nPages are omitted if they do not exist. For example, if there is no next page, the `next` link is omitted. Examples:\n\n\u003c/clients?page_size=5\u0026page_token=0\u003e; rel=\"first\",\u003c/clients?page_size=5\u0026page_token=15\u003e; rel=\"next\",\u003c/clients?page_size=5\u0026page_token=5\u003e; rel=\"prev\",\u003c/clients?page_size=5\u0026page_token=20\u003e; rel=\"last\"",
           "type": "string"
         },
         "x-total-count": {
@@ -3465,7 +3499,7 @@
       "headers": {
         "link": {
           "type": "string",
-          "description": "The Link HTTP Header\n\nThe `Link` header contains a comma-delimited list of links to the following pages:\n\nfirst: The first page of results.\nnext: The next page of results.\nprev: The previous page of results.\nlast: The last page of results.\n\nPages are omitted if they do not exist. For example, if there is no next page, the `next` link is omitted. Examples:\n\n\u003c/clients?limit=5\u0026offset=0\u003e; rel=\"first\",\u003c/clients?limit=5\u0026offset=15\u003e; rel=\"next\",\u003c/clients?limit=5\u0026offset=5\u003e; rel=\"prev\",\u003c/clients?limit=5\u0026offset=20\u003e; rel=\"last\""
+          "description": "The Link HTTP Header\n\nThe `Link` header contains a comma-delimited list of links to the following pages:\n\nfirst: The first page of results.\nnext: The next page of results.\nprev: The previous page of results.\nlast: The last page of results.\n\nPages are omitted if they do not exist. For example, if there is no next page, the `next` link is omitted. Examples:\n\n\u003c/clients?page_size=5\u0026page_token=0\u003e; rel=\"first\",\u003c/clients?page_size=5\u0026page_token=15\u003e; rel=\"next\",\u003c/clients?page_size=5\u0026page_token=5\u003e; rel=\"prev\",\u003c/clients?page_size=5\u0026page_token=20\u003e; rel=\"last\""
         },
         "x-total-count": {
           "type": "integer",

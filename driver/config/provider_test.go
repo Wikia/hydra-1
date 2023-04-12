@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,7 +25,7 @@ import (
 
 	"github.com/ory/x/logrusx"
 
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/x"
 )
 
 func newProvider() *DefaultProvider {
@@ -268,7 +267,7 @@ func TestViperProviderValidates(t *testing.T) {
 	assert.Contains(t, c.DSN(), "sqlite://")
 
 	// webfinger
-	assert.Equal(t, []string{"hydra.openid.id-token"}, c.WellKnownKeys(ctx))
+	assert.Equal(t, []string{"hydra.openid.id-token", "hydra.jwt.access-token"}, c.WellKnownKeys(ctx))
 	assert.Equal(t, urlx.ParseOrPanic("https://example.com"), c.OAuth2ClientRegistrationURL(ctx))
 	assert.Equal(t, urlx.ParseOrPanic("https://example.com/jwks.json"), c.JWKSURL(ctx))
 	assert.Equal(t, urlx.ParseOrPanic("https://example.com/auth"), c.OAuth2AuthURL(ctx))
@@ -312,8 +311,13 @@ func TestViperProviderValidates(t *testing.T) {
 	assert.Equal(t, true, c.GetEnforcePKCEForPublicClients(ctx))
 
 	// secrets
-	assert.Equal(t, []byte{0x64, 0x40, 0x5f, 0xd4, 0x66, 0xc9, 0x8c, 0x88, 0xa7, 0xf2, 0xcb, 0x95, 0xcd, 0x95, 0xcb, 0xa3, 0x41, 0x49, 0x8b, 0x97, 0xba, 0x9e, 0x92, 0xee, 0x4c, 0xaf, 0xe0, 0x71, 0x23, 0x28, 0xeb, 0xfc}, c.GetGlobalSecret(ctx))
-	assert.Equal(t, [][]uint8{[]byte("some-random-cookie-secret")}, c.GetCookieSecrets(ctx))
+	secret, err := c.GetGlobalSecret(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0x64, 0x40, 0x5f, 0xd4, 0x66, 0xc9, 0x8c, 0x88, 0xa7, 0xf2, 0xcb, 0x95, 0xcd, 0x95, 0xcb, 0xa3, 0x41, 0x49, 0x8b, 0x97, 0xba, 0x9e, 0x92, 0xee, 0x4c, 0xaf, 0xe0, 0x71, 0x23, 0x28, 0xeb, 0xfc}, secret)
+
+	cookieSecret, err := c.GetCookieSecrets(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, [][]uint8{[]byte("some-random-cookie-secret")}, cookieSecret)
 
 	// profiling
 	assert.Equal(t, "cpu", c.Source(ctx).String("profiling"))
@@ -326,11 +330,19 @@ func TestViperProviderValidates(t *testing.T) {
 			Jaeger: otelx.JaegerConfig{
 				LocalAgentAddress: "127.0.0.1:6831",
 				Sampling: otelx.JaegerSampling{
-					ServerURL: "http://sampling",
+					ServerURL:    "http://sampling",
+					TraceIdRatio: 1,
 				},
 			},
 			Zipkin: otelx.ZipkinConfig{
 				ServerURL: "http://zipkin/api/v2/spans",
+			},
+			OTLP: otelx.OTLPConfig{
+				ServerURL: "localhost:4318",
+				Insecure:  true,
+				Sampling: otelx.OTLPSampling{
+					SamplingRatio: 1.0,
+				},
 			},
 		},
 	}, c.Tracing())
@@ -405,7 +417,7 @@ func TestCookieSecure(t *testing.T) {
 func TestTokenRefreshHookURL(t *testing.T) {
 	ctx := context.Background()
 	l := logrusx.New("", "")
-	l.Logrus().SetOutput(ioutil.Discard)
+	l.Logrus().SetOutput(io.Discard)
 	c := MustNew(context.Background(), l, configx.SkipValidation())
 
 	assert.EqualValues(t, (*url.URL)(nil), c.TokenRefreshHookURL(ctx))
@@ -421,24 +433,24 @@ func TestJWTBearer(t *testing.T) {
 	p := MustNew(context.Background(), l)
 
 	ctx := context.Background()
-	//p.MustSet(ctx, KeyOAuth2GrantJWTClientAuthOptional, false)
+	// p.MustSet(ctx, KeyOAuth2GrantJWTClientAuthOptional, false)
 	p.MustSet(ctx, KeyOAuth2GrantJWTMaxDuration, "1h")
 	p.MustSet(ctx, KeyOAuth2GrantJWTIssuedDateOptional, false)
 	p.MustSet(ctx, KeyOAuth2GrantJWTIDOptional, false)
 
-	//assert.Equal(t, false, p.GetGrantTypeJWTBearerCanSkipClientAuth(ctx))
+	// assert.Equal(t, false, p.GetGrantTypeJWTBearerCanSkipClientAuth(ctx))
 	assert.Equal(t, 1.0, p.GetJWTMaxDuration(ctx).Hours())
 	assert.Equal(t, false, p.GetGrantTypeJWTBearerIssuedDateOptional(ctx))
 	assert.Equal(t, false, p.GetGrantTypeJWTBearerIDOptional(ctx))
 
 	p2 := MustNew(context.Background(), l)
 
-	//p2.MustSet(ctx, KeyOAuth2GrantJWTClientAuthOptional, true)
+	// p2.MustSet(ctx, KeyOAuth2GrantJWTClientAuthOptional, true)
 	p2.MustSet(ctx, KeyOAuth2GrantJWTMaxDuration, "24h")
 	p2.MustSet(ctx, KeyOAuth2GrantJWTIssuedDateOptional, true)
 	p2.MustSet(ctx, KeyOAuth2GrantJWTIDOptional, true)
 
-	//assert.Equal(t, true, p2.GetGrantTypeJWTBearerCanSkipClientAuth(ctx))
+	// assert.Equal(t, true, p2.GetGrantTypeJWTBearerCanSkipClientAuth(ctx))
 	assert.Equal(t, 24.0, p2.GetJWTMaxDuration(ctx).Hours())
 	assert.Equal(t, true, p2.GetGrantTypeJWTBearerIssuedDateOptional(ctx))
 	assert.Equal(t, true, p2.GetGrantTypeJWTBearerIDOptional(ctx))

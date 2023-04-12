@@ -20,9 +20,9 @@ import (
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 
-	"github.com/ory/hydra/internal"
-	"github.com/ory/hydra/jwk"
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/internal"
+	"github.com/ory/hydra/v2/jwk"
+	"github.com/ory/hydra/v2/x"
 	"github.com/ory/x/contextx"
 
 	"gopkg.in/square/go-jose.v2/cryptosigner"
@@ -189,8 +189,13 @@ func TestExcludeOpaquePrivateKeys(t *testing.T) {
 	assert.NoError(t, err)
 	require.Len(t, opaqueKeys.Keys, 1)
 	opaqueKeys.Keys[0].Key = cryptosigner.Opaque(opaqueKeys.Keys[0].Key.(*rsa.PrivateKey))
+
 	keys := jwk.ExcludeOpaquePrivateKeys(opaqueKeys)
-	require.Len(t, keys.Keys, 0)
+
+	require.Len(t, keys.Keys, 1)
+	k := keys.Keys[0]
+	_, isPublic := k.Key.(*rsa.PublicKey)
+	assert.True(t, isPublic)
 }
 
 func TestGetOrGenerateKeys(t *testing.T) {

@@ -7,15 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ory/hydra/v2/driver/config"
 	"github.com/ory/x/stringsx"
 
 	"github.com/gobuffalo/pop/v6"
 	"github.com/gofrs/uuid"
 
-	jose "gopkg.in/square/go-jose.v2" // Naming the dependency jose is important for go-swagger to work, see https://github.com/go-swagger/go-swagger/issues/1587
+	"gopkg.in/square/go-jose.v2"
 
 	"github.com/ory/fosite"
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/x"
 	"github.com/ory/x/sqlxx"
 )
 
@@ -195,10 +196,12 @@ type Client struct {
 	//
 	// Requested Client Authentication method for the Token Endpoint. The options are:
 	//
-	// - `client_secret_post`: (default) Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` in the HTTP body.
-	// - `client_secret_basic`: Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` encoded in the HTTP Authorization header.
+	// - `client_secret_basic`: (default) Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` encoded in the HTTP Authorization header.
+	// - `client_secret_post`: Send `client_id` and `client_secret` as `application/x-www-form-urlencoded` in the HTTP body.
 	// - `private_key_jwt`: Use JSON Web Tokens to authenticate the client.
 	// - `none`: Used for public clients (native apps, mobile apps) which can not have secrets.
+	//
+	// default: client_secret_basic
 	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method,omitempty" db:"token_endpoint_auth_method" faker:"len=25"`
 
 	// OAuth 2.0 Token Endpoint Signing Algorithm
@@ -290,6 +293,17 @@ type Client struct {
 	//
 	// RegistrationClientURI is the URL used to update, get, or delete the OAuth2 Client.
 	RegistrationClientURI string `json:"registration_client_uri,omitempty" db:"-"`
+
+	// OAuth 2.0 Access Token Strategy
+	//
+	// AccessTokenStrategy is the strategy used to generate access tokens.
+	// Valid options are `jwt` and `opaque`. `jwt` is a bad idea, see https://www.ory.sh/docs/hydra/advanced#json-web-tokens
+	// Setting the stragegy here overrides the global setting in `strategies.access_token`.
+	AccessTokenStrategy string `json:"access_token_strategy,omitempty" db:"access_token_strategy" faker:"-"`
+
+	// SkipConsent skips the consent screen for this client. This field can only
+	// be set from the admin API.
+	SkipConsent bool `json:"skip_consent" db:"skip_consent" faker:"-"`
 
 	Lifespans
 }
@@ -531,4 +545,18 @@ func (c *Client) GetEffectiveLifespan(gt fosite.GrantType, tt fosite.TokenType, 
 		return fallback
 	}
 	return *cl
+}
+
+func (c *Client) GetAccessTokenStrategy() config.AccessTokenStrategyType {
+	// We ignore the error here, because the empty string will default to
+	// the global access token strategy.
+	s, _ := config.ToAccessTokenStrategyType(c.AccessTokenStrategy)
+	return s
+}
+
+func AccessTokenStrategySource(client fosite.Client) config.AccessTokenStrategySource {
+	if source, ok := client.(config.AccessTokenStrategySource); ok {
+		return source
+	}
+	return nil
 }

@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ory/hydra/client"
-	"github.com/ory/hydra/driver/config"
-	"github.com/ory/hydra/oauth2"
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/client"
+	"github.com/ory/hydra/v2/driver/config"
+	"github.com/ory/hydra/v2/oauth2"
+	"github.com/ory/hydra/v2/x"
 
 	"github.com/gobwas/glob"
 	"github.com/rs/cors"
@@ -81,8 +81,18 @@ func Middleware(
 				return true
 			}
 
-			username, _, ok := r.BasicAuth()
-			if !ok || username == "" {
+			var clientID string
+
+			// if the client uses client_secret_post auth it will provide its client ID in form data
+			clientID = r.PostFormValue("client_id")
+
+			// if the client uses client_secret_basic auth the client ID will be the username component
+			if clientID == "" {
+				clientID, _, _ = r.BasicAuth()
+			}
+
+			// otherwise, this may be a bearer auth request, in which case we can introspect the token
+			if clientID == "" {
 				token := fosite.AccessTokenFromRequest(r)
 				if token == "" {
 					return false
@@ -94,10 +104,10 @@ func Middleware(
 					return false
 				}
 
-				username = ar.GetClient().GetID()
+				clientID = ar.GetClient().GetID()
 			}
 
-			cl, err := reg.ClientManager().GetConcreteClient(ctx, username)
+			cl, err := reg.ClientManager().GetConcreteClient(ctx, clientID)
 			if err != nil {
 				return false
 			}

@@ -17,14 +17,14 @@ import (
 
 	"github.com/ory/x/otelx"
 
-	"github.com/ory/hydra/spec"
+	"github.com/ory/hydra/v2/spec"
 	"github.com/ory/x/dbal"
 
 	"github.com/ory/x/configx"
 
 	"github.com/ory/x/logrusx"
 
-	"github.com/ory/hydra/x"
+	"github.com/ory/hydra/v2/x"
 	"github.com/ory/x/contextx"
 	"github.com/ory/x/stringslice"
 	"github.com/ory/x/urlx"
@@ -61,6 +61,7 @@ const (
 	KeyCookieLoginCSRFName                       = "serve.cookies.names.login_csrf"
 	KeyCookieConsentCSRFName                     = "serve.cookies.names.consent_csrf"
 	KeyCookieSessionName                         = "serve.cookies.names.session"
+	KeyCookieSessionPath                         = "serve.cookies.paths.session"
 	KeyConsentRequestMaxAge                      = "ttl.login_consent_request"
 	KeyAccessTokenLifespan                       = "ttl.access_token"  // #nosec G101
 	KeyRefreshTokenLifespan                      = "ttl.refresh_token" // #nosec G101
@@ -93,6 +94,7 @@ const (
 	KeyOAuth2GrantJWTIssuedDateOptional          = "oauth2.grant.jwt.iat_optional"
 	KeyOAuth2GrantJWTMaxDuration                 = "oauth2.grant.jwt.max_ttl"
 	KeyRefreshTokenHookURL                       = "oauth2.refresh_token_hook" // #nosec G101
+	KeyTokenHookURL                              = "oauth2.token_hook"         // #nosec G101
 	KeyDevelopmentMode                           = "dev"
 )
 
@@ -102,9 +104,7 @@ var _ hasherx.PBKDF2Configurator = (*DefaultProvider)(nil)
 var _ hasherx.BCryptConfigurator = (*DefaultProvider)(nil)
 
 type DefaultProvider struct {
-	generatedSecret []byte
-	l               *logrusx.Logger
-
+	l *logrusx.Logger
 	p *configx.Provider
 	c contextx.Contextualizer
 }
@@ -188,16 +188,8 @@ func (p *DefaultProvider) IsDevelopmentMode(ctx context.Context) bool {
 }
 
 func (p *DefaultProvider) WellKnownKeys(ctx context.Context, include ...string) []string {
-	if p.AccessTokenStrategy(ctx) == AccessTokenJWTStrategy {
-		include = append(include, x.OAuth2JWTKeyName)
-	}
-
-	include = append(include, x.OpenIDConnectKeyName)
+	include = append(include, x.OAuth2JWTKeyName, x.OpenIDConnectKeyName)
 	return stringslice.Unique(append(p.getProvider(ctx).Strings(KeyWellKnownKeys), include...))
-}
-
-func (p *DefaultProvider) IsUsingJWTAsAccessTokens(ctx context.Context) bool {
-	return p.AccessTokenStrategy(ctx) != "opaque"
 }
 
 func (p *DefaultProvider) ClientHTTPNoPrivateIPRanges() bool {
@@ -208,7 +200,7 @@ func (p *DefaultProvider) AllowedTopLevelClaims(ctx context.Context) []string {
 	return stringslice.Unique(p.getProvider(ctx).Strings(KeyAllowedTopLevelClaims))
 }
 
-func (p *DefaultProvider) SubjectTypesSupported(ctx context.Context) []string {
+func (p *DefaultProvider) SubjectTypesSupported(ctx context.Context, additionalSources ...AccessTokenStrategySource) []string {
 	types := stringslice.Filter(
 		p.getProvider(ctx).StringsF(KeySubjectTypesSupported, []string{"public"}),
 		func(s string) bool {
@@ -221,7 +213,7 @@ func (p *DefaultProvider) SubjectTypesSupported(ctx context.Context) []string {
 	}
 
 	if stringslice.Has(types, "pairwise") {
-		if p.AccessTokenStrategy(ctx) == AccessTokenJWTStrategy {
+		if p.AccessTokenStrategy(ctx, additionalSources...) == AccessTokenJWTStrategy {
 			p.l.Warn(`The pairwise subject identifier algorithm is not supported by the JWT OAuth 2.0 Access Token Strategy and is thus being disabled. Please remove "pairwise" from oidc.subject_identifiers.supported_types" (e.g. oidc.subject_identifiers.supported_types=public) or set strategies.access_token to "opaque".`)
 			types = stringslice.Filter(
 				types,
@@ -313,17 +305,21 @@ func (p *DefaultProvider) Tracing() *otelx.Config {
 	return p.getProvider(contextx.RootContext).TracingConfig("Ory Hydra")
 }
 
-func (p *DefaultProvider) GetCookieSecrets(ctx context.Context) [][]byte {
+func (p *DefaultProvider) GetCookieSecrets(ctx context.Context) ([][]byte, error) {
 	secrets := p.getProvider(ctx).Strings(KeyGetCookieSecrets)
 	if len(secrets) == 0 {
-		return [][]byte{p.GetGlobalSecret(ctx)}
+		secret, err := p.GetGlobalSecret(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return [][]byte{secret}, nil
 	}
 
 	bs := make([][]byte, len(secrets))
 	for k := range secrets {
 		bs[k] = []byte(secrets[k])
 	}
-	return bs
+	return bs, nil
 }
 
 func (p *DefaultProvider) LogoutRedirectURL(ctx context.Context) *url.URL {
@@ -404,7 +400,19 @@ func (p *DefaultProvider) JWKSURL(ctx context.Context) *url.URL {
 	return p.getProvider(ctx).RequestURIF(KeyJWKSURL, urlx.AppendPaths(p.IssuerURL(ctx), "/.well-known/jwks.json"))
 }
 
-func (p *DefaultProvider) AccessTokenStrategy(ctx context.Context) AccessTokenStrategyType {
+type AccessTokenStrategySource interface {
+	GetAccessTokenStrategy() AccessTokenStrategyType
+}
+
+func (p *DefaultProvider) AccessTokenStrategy(ctx context.Context, additionalSources ...AccessTokenStrategySource) AccessTokenStrategyType {
+	for _, src := range additionalSources {
+		if src == nil {
+			continue
+		}
+		if strategy := src.GetAccessTokenStrategy(); strategy != "" {
+			return strategy
+		}
+	}
 	s, err := ToAccessTokenStrategyType(p.getProvider(ctx).String(KeyAccessTokenStrategy))
 	if err != nil {
 		p.l.WithError(err).Warn("Key `strategies.access_token` contains an invalid value, falling back to `opaque` strategy.")
@@ -414,11 +422,11 @@ func (p *DefaultProvider) AccessTokenStrategy(ctx context.Context) AccessTokenSt
 	return s
 }
 
-func (p *DefaultProvider) TokenRefreshHookURL(ctx context.Context) *url.URL {
-	if len(p.getProvider(ctx).String(KeyRefreshTokenHookURL)) == 0 {
-		return nil
-	}
+func (p *DefaultProvider) TokenHookURL(ctx context.Context) *url.URL {
+	return p.getProvider(ctx).RequestURIF(KeyTokenHookURL, nil)
+}
 
+func (p *DefaultProvider) TokenRefreshHookURL(ctx context.Context) *url.URL {
 	return p.getProvider(ctx).RequestURIF(KeyRefreshTokenHookURL, nil)
 }
 
@@ -513,6 +521,10 @@ func (p *DefaultProvider) GetJWTMaxDuration(ctx context.Context) time.Duration {
 
 func (p *DefaultProvider) CookieDomain(ctx context.Context) string {
 	return p.getProvider(ctx).String(KeyCookieDomain)
+}
+
+func (p *DefaultProvider) SessionCookiePath(ctx context.Context) string {
+	return p.getProvider(ctx).StringF(KeyCookieSessionPath, "/")
 }
 
 func (p *DefaultProvider) CookieNameLoginCSRF(ctx context.Context) string {

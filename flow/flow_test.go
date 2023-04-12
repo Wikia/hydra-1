@@ -13,7 +13,7 @@ import (
 
 	"github.com/bxcodec/faker/v3"
 
-	"github.com/ory/hydra/consent"
+	"github.com/ory/hydra/v2/consent"
 	"github.com/ory/x/sqlxx"
 )
 
@@ -40,6 +40,7 @@ func (f *Flow) setHandledLoginRequest(r *consent.HandledLoginRequest) {
 	f.ID = r.ID
 	f.LoginRemember = r.Remember
 	f.LoginRememberFor = r.RememberFor
+	f.LoginExtendSessionLifespan = r.ExtendSessionLifespan
 	f.ACR = r.ACR
 	f.AMR = r.AMR
 	f.Subject = r.Subject
