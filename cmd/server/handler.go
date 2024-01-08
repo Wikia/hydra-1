@@ -201,7 +201,7 @@ func setup(ctx context.Context, d driver.Registry, cmd *cobra.Command) (admin *h
 		NewMiddlewareFromLogger(d.Logger(),
 			fmt.Sprintf("hydra/admin: %s", d.Config().IssuerURL(ctx).String()))
 	if d.Config().DisableHealthAccessLog(config.AdminInterface) {
-		adminLogger = adminLogger.ExcludePaths("/admin"+healthx.AliveCheckPath, "/admin"+healthx.ReadyCheckPath)
+		adminLogger = adminLogger.ExcludePaths(healthx.AliveCheckPath, healthx.ReadyCheckPath)
 	}
 
 	adminmw.Use(adminLogger)
@@ -283,8 +283,8 @@ func setup(ctx context.Context, d driver.Registry, cmd *cobra.Command) (admin *h
 				Endpoint:             "https://sqa.ory.sh",
 				GzipCompressionLevel: 6,
 				BatchMaxSize:         500 * 1000,
-				BatchSize:            250,
-				Interval:             time.Hour * 24,
+				BatchSize:            1000,
+				Interval:             time.Hour * 6,
 			},
 		},
 	)
