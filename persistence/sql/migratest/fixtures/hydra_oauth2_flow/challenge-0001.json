@@ -14,6 +14,7 @@
   "ClientID": "",
   "RequestURL": "http://request/0001",
   "SessionID": "",
+  "IdentityProviderSessionID": "",
   "LoginVerifier": "verifier-0001",
   "LoginCSRF": "csrf-0001",
   "LoginInitializedAt": null,
@@ -32,7 +33,8 @@
     "error_description": "",
     "error_hint": "",
     "status_code": 0,
-    "error_debug": ""
+    "error_debug": "",
+    "valid": false
   },
   "LoginAuthenticatedAt": null,
   "ConsentChallengeID": "challenge-0001",
@@ -52,7 +54,8 @@
     "error_description": "",
     "error_hint": "",
     "status_code": 0,
-    "error_debug": ""
+    "error_debug": "",
+    "valid": false
   },
   "SessionIDToken": {
     "session_id_token-0001": "0001"

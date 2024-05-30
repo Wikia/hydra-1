@@ -8,14 +8,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/url"
+
+	"github.com/pkg/errors"
 
 	"github.com/hashicorp/go-retryablehttp"
 
+	"github.com/ory/hydra/v2/flow"
 	"github.com/ory/hydra/v2/x"
 
 	"github.com/ory/fosite"
-	"github.com/ory/hydra/v2/consent"
 	"github.com/ory/hydra/v2/driver/config"
 	"github.com/ory/x/errorsx"
 )
@@ -54,11 +55,36 @@ type TokenHookRequest struct {
 // swagger:ignore
 type TokenHookResponse struct {
 	// Session is the session data returned by the hook.
-	Session consent.AcceptOAuth2ConsentRequestSession `json:"session"`
+	Session flow.AcceptOAuth2ConsentRequestSession `json:"session"`
 }
 
-func executeHookAndUpdateSession(ctx context.Context, reg x.HTTPClientProvider, hookURL *url.URL, reqBodyBytes []byte, session *Session) error {
-	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodPost, hookURL.String(), bytes.NewReader(reqBodyBytes))
+type APIKeyAuthConfig struct {
+	In    string `json:"in"`
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+func applyAuth(req *retryablehttp.Request, auth *config.Auth) error {
+	if auth == nil {
+		return nil
+	}
+
+	switch auth.Type {
+	case "api_key":
+		switch auth.Config.In {
+		case "header":
+			req.Header.Set(auth.Config.Name, auth.Config.Value)
+		case "cookie":
+			req.AddCookie(&http.Cookie{Name: auth.Config.Name, Value: auth.Config.Value})
+		}
+	default:
+		return errors.Errorf("unsupported auth type %q", auth.Type)
+	}
+	return nil
+}
+
+func executeHookAndUpdateSession(ctx context.Context, reg x.HTTPClientProvider, hookConfig *config.HookConfig, reqBodyBytes []byte, session *Session) error {
+	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodPost, hookConfig.URL, bytes.NewReader(reqBodyBytes))
 	if err != nil {
 		return errorsx.WithStack(
 			fosite.ErrServerError.
@@ -66,6 +92,13 @@ func executeHookAndUpdateSession(ctx context.Context, reg x.HTTPClientProvider, 
 				WithDescription("An error occurred while preparing the token hook.").
 				WithDebugf("Unable to prepare the HTTP Request: %s", err),
 		)
+	}
+	if err := applyAuth(req, hookConfig.Auth); err != nil {
+		return errorsx.WithStack(
+			fosite.ErrServerError.
+				WithWrap(err).
+				WithDescription("An error occurred while applying the token hook authentication.").
+				WithDebugf("Unable to apply the token hook authentication: %s", err))
 	}
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
@@ -123,8 +156,8 @@ func TokenHook(reg interface {
 	x.HTTPClientProvider
 }) AccessRequestHook {
 	return func(ctx context.Context, requester fosite.AccessRequester) error {
-		hookURL := reg.Config().TokenHookURL(ctx)
-		if hookURL == nil {
+		hookConfig := reg.Config().TokenHookConfig(ctx)
+		if hookConfig == nil {
 			return nil
 		}
 
@@ -156,7 +189,7 @@ func TokenHook(reg interface {
 			)
 		}
 
-		err = executeHookAndUpdateSession(ctx, reg, hookURL, reqBodyBytes, session)
+		err = executeHookAndUpdateSession(ctx, reg, hookConfig, reqBodyBytes, session)
 		if err != nil {
 			return err
 		}

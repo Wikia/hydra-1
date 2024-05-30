@@ -9,21 +9,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ory/hydra/v2/driver/config"
-
-	hydra "github.com/ory/hydra-client-go/v2"
-
-	"github.com/ory/hydra/v2/internal"
-	"github.com/ory/hydra/v2/x"
-	"github.com/ory/x/contextx"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	hydra "github.com/ory/hydra-client-go/v2"
+	"github.com/ory/hydra/v2/driver/config"
+	"github.com/ory/hydra/v2/internal"
 	. "github.com/ory/hydra/v2/jwk"
+	"github.com/ory/hydra/v2/x"
+	"github.com/ory/x/contextx"
 )
 
 func TestJWKSDK(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	conf := internal.NewConfigurationWithDefaults()
 	reg := internal.NewRegistryMemory(t, conf, &contextx.Default{})
@@ -41,6 +39,7 @@ func TestJWKSDK(t *testing.T) {
 
 	expectedKid := "key-bar"
 	t.Run("JSON Web Key", func(t *testing.T) {
+		t.Parallel()
 		t.Run("CreateJwkSetKey", func(t *testing.T) {
 			// Create a key called set-foo
 			resultKeys, _, err := sdk.JwkApi.CreateJsonWebKeySet(context.Background(), "set-foo").CreateJsonWebKeySet(hydra.CreateJsonWebKeySet{
@@ -93,10 +92,12 @@ func TestJWKSDK(t *testing.T) {
 	})
 
 	t.Run("JWK Set", func(t *testing.T) {
+		t.Parallel()
 		t.Run("CreateJwkSetKey", func(t *testing.T) {
 			resultKeys, _, err := sdk.JwkApi.CreateJsonWebKeySet(ctx, "set-foo2").CreateJsonWebKeySet(hydra.CreateJsonWebKeySet{
 				Alg: "RS256",
 				Kid: "key-bar",
+				Use: "sig",
 			}).Execute()
 			require.NoError(t, err)
 			require.Len(t, resultKeys.Keys, 1)

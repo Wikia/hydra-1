@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/ory/fosite"
+	"github.com/ory/fosite/token/jwt"
 	"github.com/ory/hydra/v2/x"
 )
 
@@ -68,6 +69,12 @@ func (p *DefaultProvider) GetRefreshTokenLifespan(ctx context.Context) time.Dura
 	return p.getProvider(ctx).DurationF(KeyRefreshTokenLifespan, time.Hour*720)
 }
 
+var _ fosite.VerifiableCredentialsNonceLifespanProvider = (*DefaultProvider)(nil)
+
+func (p *DefaultProvider) GetVerifiableCredentialsNonceLifespan(ctx context.Context) time.Duration {
+	return p.getProvider(ctx).DurationF(KeyVerifiableCredentialsNonceLifespan, time.Hour)
+}
+
 var _ fosite.IDTokenLifespanProvider = (*DefaultProvider)(nil)
 
 func (p *DefaultProvider) GetIDTokenLifespan(ctx context.Context) time.Duration {
@@ -87,6 +94,21 @@ func (p *DefaultProvider) GetScopeStrategy(ctx context.Context) fosite.ScopeStra
 		return fosite.WildcardScopeStrategy
 	}
 	return fosite.ExactScopeStrategy
+}
+
+var _ fosite.JWTScopeFieldProvider = (*DefaultProvider)(nil)
+
+func (p *DefaultProvider) GetJWTScopeField(ctx context.Context) jwt.JWTScopeFieldEnum {
+	switch strings.ToLower(p.getProvider(ctx).String(KeyJWTScopeClaimStrategy)) {
+	case "string":
+		return jwt.JWTScopeFieldString
+	case "both":
+		return jwt.JWTScopeFieldBoth
+	case "list":
+		return jwt.JWTScopeFieldList
+	default:
+		return jwt.JWTScopeFieldUnset
+	}
 }
 
 func (p *DefaultProvider) GetUseLegacyErrorFormat(context.Context) bool {

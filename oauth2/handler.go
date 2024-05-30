@@ -4,6 +4,7 @@
 package oauth2
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -12,9 +13,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ory/x/httprouterx"
+	"github.com/tidwall/gjson"
 
 	"github.com/pborman/uuid"
+
+	"github.com/ory/hydra/v2/x/events"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/josex"
+	"github.com/ory/x/stringsx"
+
+	jwtV5 "github.com/golang-jwt/jwt/v5"
 
 	"github.com/ory/x/errorsx"
 
@@ -42,9 +50,10 @@ const (
 	AuthPath              = "/oauth2/auth"
 	LogoutPath            = "/oauth2/sessions/logout"
 
-	UserinfoPath  = "/userinfo"
-	WellKnownPath = "/.well-known/openid-configuration"
-	JWKPath       = "/.well-known/jwks.json"
+	VerifiableCredentialsPath = "/credentials"
+	UserinfoPath              = "/userinfo"
+	WellKnownPath             = "/.well-known/openid-configuration"
+	JWKPath                   = "/.well-known/jwks.json"
 
 	// IntrospectPath points to the OAuth2 introspection endpoint.
 	IntrospectPath   = "/oauth2/introspect"
@@ -58,7 +67,10 @@ type Handler struct {
 }
 
 func NewHandler(r InternalRegistry, c *config.DefaultProvider) *Handler {
-	return &Handler{r: r, c: c}
+	return &Handler{
+		r: r,
+		c: c,
+	}
 }
 
 func (h *Handler) SetRoutes(admin *httprouterx.RouterAdmin, public *httprouterx.RouterPublic, corsMiddleware func(http.Handler) http.Handler) {
@@ -89,6 +101,9 @@ func (h *Handler) SetRoutes(admin *httprouterx.RouterAdmin, public *httprouterx.
 	public.Handler("GET", UserinfoPath, corsMiddleware(http.HandlerFunc(h.getOidcUserInfo)))
 	public.Handler("POST", UserinfoPath, corsMiddleware(http.HandlerFunc(h.getOidcUserInfo)))
 
+	public.Handler("OPTIONS", VerifiableCredentialsPath, corsMiddleware(http.HandlerFunc(h.handleOptions)))
+	public.Handler("POST", VerifiableCredentialsPath, corsMiddleware(http.HandlerFunc(h.createVerifiableCredential)))
+
 	admin.POST(IntrospectPath, h.introspectOAuth2Token)
 	admin.DELETE(DeleteTokensPath, h.deleteOAuth2Token)
 }
@@ -108,7 +123,7 @@ func (h *Handler) SetRoutes(admin *httprouterx.RouterAdmin, public *httprouterx.
 //
 //	Responses:
 //	  302: emptyResponse
-func (h *Handler) performOidcFrontOrBackChannelLogout(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+func (h *Handler) performOidcFrontOrBackChannelLogout(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	ctx := r.Context()
 
 	handled, err := h.r.ConsentStrategy().HandleOpenIDConnectLogout(ctx, w, r)
@@ -400,6 +415,43 @@ type oidcConfiguration struct {
 	// JSON array containing a list of Proof Key for Code Exchange (PKCE) [RFC7636] code challenge methods supported
 	// by this authorization server.
 	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
+
+	// OpenID Connect Verifiable Credentials Endpoint
+	//
+	// Contains the URL of the Verifiable Credentials Endpoint.
+	CredentialsEndpointDraft00 string `json:"credentials_endpoint_draft_00"`
+
+	// OpenID Connect Verifiable Credentials Supported
+	//
+	// JSON array containing a list of the Verifiable Credentials supported by this authorization server.
+	CredentialsSupportedDraft00 []CredentialSupportedDraft00 `json:"credentials_supported_draft_00"`
+}
+
+// Verifiable Credentials Metadata (Draft 00)
+//
+// Includes information about the supported verifiable credentials.
+//
+// swagger:model credentialSupportedDraft00
+type CredentialSupportedDraft00 struct {
+	// OpenID Connect Verifiable Credentials Format
+	//
+	// Contains the format that is supported by this authorization server.
+	Format string `json:"format"`
+
+	// OpenID Connect Verifiable Credentials Types
+	//
+	// Contains the types of verifiable credentials supported.
+	Types []string `json:"types"`
+
+	// OpenID Connect Verifiable Credentials Cryptographic Binding Methods Supported
+	//
+	// Contains a list of cryptographic binding methods supported for signing the proof.
+	CryptographicBindingMethodsSupported []string `json:"cryptographic_binding_methods_supported"`
+
+	// OpenID Connect Verifiable Credentials Cryptographic Suites Supported
+	//
+	// Contains a list of cryptographic suites methods supported for signing the proof.
+	CryptographicSuitesSupported []string `json:"cryptographic_suites_supported"`
 }
 
 // swagger:route GET /.well-known/openid-configuration oidc discoverOidcConfiguration
@@ -420,23 +472,24 @@ type oidcConfiguration struct {
 //	  200: oidcConfiguration
 //	  default: errorOAuth2
 func (h *Handler) discoverOidcConfiguration(w http.ResponseWriter, r *http.Request) {
-	key, err := h.r.OpenIDJWTStrategy().GetPublicKey(r.Context())
+	ctx := r.Context()
+	key, err := h.r.OpenIDJWTStrategy().GetPublicKey(ctx)
 	if err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return
 	}
 	h.r.Writer().Write(w, r, &oidcConfiguration{
-		Issuer:                                 h.c.IssuerURL(r.Context()).String(),
-		AuthURL:                                h.c.OAuth2AuthURL(r.Context()).String(),
-		TokenURL:                               h.c.OAuth2TokenURL(r.Context()).String(),
-		JWKsURI:                                h.c.JWKSURL(r.Context()).String(),
-		RevocationEndpoint:                     urlx.AppendPaths(h.c.IssuerURL(r.Context()), RevocationPath).String(),
-		RegistrationEndpoint:                   h.c.OAuth2ClientRegistrationURL(r.Context()).String(),
-		SubjectTypes:                           h.c.SubjectTypesSupported(r.Context()),
+		Issuer:                                 h.c.IssuerURL(ctx).String(),
+		AuthURL:                                h.c.OAuth2AuthURL(ctx).String(),
+		TokenURL:                               h.c.OAuth2TokenURL(ctx).String(),
+		JWKsURI:                                h.c.JWKSURL(ctx).String(),
+		RevocationEndpoint:                     urlx.AppendPaths(h.c.IssuerURL(ctx), RevocationPath).String(),
+		RegistrationEndpoint:                   h.c.OAuth2ClientRegistrationURL(ctx).String(),
+		SubjectTypes:                           h.c.SubjectTypesSupported(ctx),
 		ResponseTypes:                          []string{"code", "code id_token", "id_token", "token id_token", "token", "token id_token code"},
-		ClaimsSupported:                        h.c.OIDCDiscoverySupportedClaims(r.Context()),
-		ScopesSupported:                        h.c.OIDCDiscoverySupportedScope(r.Context()),
-		UserinfoEndpoint:                       h.c.OIDCDiscoveryUserinfoEndpoint(r.Context()).String(),
+		ClaimsSupported:                        h.c.OIDCDiscoverySupportedClaims(ctx),
+		ScopesSupported:                        h.c.OIDCDiscoverySupportedScope(ctx),
+		UserinfoEndpoint:                       h.c.OIDCDiscoveryUserinfoEndpoint(ctx).String(),
 		TokenEndpointAuthMethodsSupported:      []string{"client_secret_post", "client_secret_basic", "private_key_jwt", "none"},
 		IDTokenSigningAlgValuesSupported:       []string{key.Algorithm},
 		IDTokenSignedResponseAlg:               []string{key.Algorithm},
@@ -451,15 +504,29 @@ func (h *Handler) discoverOidcConfiguration(w http.ResponseWriter, r *http.Reque
 		BackChannelLogoutSessionSupported:      true,
 		FrontChannelLogoutSupported:            true,
 		FrontChannelLogoutSessionSupported:     true,
-		EndSessionEndpoint:                     urlx.AppendPaths(h.c.IssuerURL(r.Context()), LogoutPath).String(),
+		EndSessionEndpoint:                     urlx.AppendPaths(h.c.IssuerURL(ctx), LogoutPath).String(),
 		RequestObjectSigningAlgValuesSupported: []string{"none", "RS256", "ES256"},
 		CodeChallengeMethodsSupported:          []string{"plain", "S256"},
+		CredentialsEndpointDraft00:             h.c.CredentialsEndpointURL(ctx).String(),
+		CredentialsSupportedDraft00: []CredentialSupportedDraft00{{
+			Format:                               "jwt_vc_json",
+			Types:                                []string{"VerifiableCredential", "UserInfoCredential"},
+			CryptographicBindingMethodsSupported: []string{"jwk"},
+			CryptographicSuitesSupported: []string{
+				"PS256", "RS256", "ES256",
+				"PS384", "RS384", "ES384",
+				"PS512", "RS512", "ES512",
+				"EdDSA",
+			},
+		}},
 	})
 }
 
 // OpenID Connect Userinfo
 //
 // swagger:model oidcUserInfo
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type oidcUserInfo struct {
 	// Subject - Identifier for the End-User at the IssuerURL.
 	Subject string `json:"sub"`
@@ -543,7 +610,7 @@ type oidcUserInfo struct {
 //	  default: errorOAuth2
 func (h *Handler) getOidcUserInfo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	session := NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(ctx))
+	session := NewSessionWithCustomClaims(ctx, h.c, "")
 	tokenType, ar, err := h.r.OAuth2Provider().IntrospectToken(ctx, fosite.AccessTokenFromRequest(r), fosite.AccessToken, session)
 	if err != nil {
 		rfcerr := fosite.ErrorToRFC6749Error(err)
@@ -602,7 +669,7 @@ func (h *Handler) getOidcUserInfo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		token, _, err := h.r.OpenIDJWTStrategy().Generate(ctx, jwt.MapClaims(interim), &jwt.Headers{
+		token, _, err := h.r.OpenIDJWTStrategy().Generate(ctx, interim, &jwt.Headers{
 			Extra: map[string]interface{}{"kid": keyID},
 		})
 		if err != nil {
@@ -623,6 +690,8 @@ func (h *Handler) getOidcUserInfo(w http.ResponseWriter, r *http.Request) {
 // Revoke OAuth 2.0 Access or Refresh Token Request
 //
 // swagger:parameters revokeOAuth2Token
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type revokeOAuth2Token struct {
 	// in: formData
 	// required: true
@@ -656,6 +725,7 @@ type revokeOAuth2Token struct {
 //	  default: errorOAuth2
 func (h *Handler) revokeOAuth2Token(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	events.Trace(r.Context(), events.AccessTokenRevoked)
 
 	err := h.r.OAuth2Provider().NewRevocationRequest(ctx, r)
 	if err != nil {
@@ -668,6 +738,8 @@ func (h *Handler) revokeOAuth2Token(w http.ResponseWriter, r *http.Request) {
 // Introspect OAuth 2.0 Access or Refresh Token Request
 //
 // swagger:parameters introspectOAuth2Token
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type introspectOAuth2Token struct {
 	// The string value of the token. For access tokens, this
 	// is the "access_token" value returned from the token endpoint
@@ -705,8 +777,8 @@ type introspectOAuth2Token struct {
 //	  200: introspectedOAuth2Token
 //	  default: errorOAuth2
 func (h *Handler) introspectOAuth2Token(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	session := NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(r.Context()))
 	ctx := r.Context()
+	session := NewSessionWithCustomClaims(ctx, h.c, "")
 
 	if r.Method != "POST" {
 		err := errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("HTTP method is \"%s\", expected \"POST\".", r.Method))
@@ -791,11 +863,19 @@ func (h *Handler) introspectOAuth2Token(w http.ResponseWriter, r *http.Request, 
 	}); err != nil {
 		x.LogError(r, errorsx.WithStack(err), h.r.Logger())
 	}
+
+	events.Trace(ctx,
+		events.AccessTokenInspected,
+		events.WithSubject(session.GetSubject()),
+		events.WithClientID(resp.GetAccessRequester().GetClient().GetID()),
+	)
 }
 
 // OAuth 2.0 Token Exchange Parameters
 //
 // swagger:parameters oauth2TokenExchange
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type performOAuth2TokenFlow struct {
 	// in: formData
 	// required: true
@@ -817,6 +897,8 @@ type performOAuth2TokenFlow struct {
 // OAuth2 Token Exchange Result
 //
 // swagger:model oAuth2TokenExchange
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type oAuth2TokenExchange struct {
 	// The lifetime in seconds of the access token. For
 	// example, the value "3600" denotes that the access token will
@@ -827,7 +909,7 @@ type oAuth2TokenExchange struct {
 	Scope string `json:"scope"`
 
 	// To retrieve a refresh token request the id_token scope.
-	IDToken int `json:"id_token"`
+	IDToken string `json:"id_token"`
 
 	// The access token issued by the authorization server.
 	AccessToken string `json:"access_token"`
@@ -865,23 +947,26 @@ type oAuth2TokenExchange struct {
 //	  200: oAuth2TokenExchange
 //	  default: errorOAuth2
 func (h *Handler) oauth2TokenExchange(w http.ResponseWriter, r *http.Request) {
-	var session = NewSessionWithCustomClaims("", h.c.AllowedTopLevelClaims(r.Context()))
-	var ctx = r.Context()
+	ctx := r.Context()
+	session := NewSessionWithCustomClaims(ctx, h.c, "")
 
 	accessRequest, err := h.r.OAuth2Provider().NewAccessRequest(ctx, r, session)
 	if err != nil {
 		h.logOrAudit(err, r)
 		h.r.OAuth2Provider().WriteAccessError(ctx, w, accessRequest, err)
+		events.Trace(ctx, events.TokenExchangeError)
 		return
 	}
 
-	if accessRequest.GetGrantTypes().ExactOne("client_credentials") || accessRequest.GetGrantTypes().ExactOne("urn:ietf:params:oauth:grant-type:jwt-bearer") {
+	if accessRequest.GetGrantTypes().ExactOne(string(fosite.GrantTypeClientCredentials)) ||
+		accessRequest.GetGrantTypes().ExactOne(string(fosite.GrantTypeJWTBearer)) {
 		var accessTokenKeyID string
 		if h.c.AccessTokenStrategy(ctx, client.AccessTokenStrategySource(accessRequest.GetClient())) == "jwt" {
 			accessTokenKeyID, err = h.r.AccessTokenJWTStrategy().GetPublicKeyID(ctx)
 			if err != nil {
 				x.LogError(r, err, h.r.Logger())
 				h.r.OAuth2Provider().WriteAccessError(ctx, w, accessRequest, err)
+				events.Trace(ctx, events.TokenExchangeError, events.WithRequest(accessRequest))
 				return
 			}
 		}
@@ -895,7 +980,7 @@ func (h *Handler) oauth2TokenExchange(w http.ResponseWriter, r *http.Request) {
 		session.DefaultSession.Claims.Issuer = h.c.IssuerURL(r.Context()).String()
 		session.DefaultSession.Claims.IssuedAt = time.Now().UTC()
 
-		var scopes = accessRequest.GetRequestedScopes()
+		scopes := accessRequest.GetRequestedScopes()
 
 		// Added for compatibility with MITREid
 		if h.c.GrantAllClientCredentialsScopesPerDefault(r.Context()) && len(scopes) == 0 {
@@ -921,6 +1006,7 @@ func (h *Handler) oauth2TokenExchange(w http.ResponseWriter, r *http.Request) {
 		if err := hook(ctx, accessRequest); err != nil {
 			h.logOrAudit(err, r)
 			h.r.OAuth2Provider().WriteAccessError(ctx, w, accessRequest, err)
+			events.Trace(ctx, events.TokenExchangeError, events.WithRequest(accessRequest))
 			return
 		}
 	}
@@ -929,6 +1015,7 @@ func (h *Handler) oauth2TokenExchange(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logOrAudit(err, r)
 		h.r.OAuth2Provider().WriteAccessError(ctx, w, accessRequest, err)
+		events.Trace(ctx, events.TokenExchangeError, events.WithRequest(accessRequest))
 		return
 	}
 
@@ -962,7 +1049,7 @@ func (h *Handler) oAuth2Authorize(w http.ResponseWriter, r *http.Request, _ http
 		return
 	}
 
-	session, err := h.r.ConsentStrategy().HandleOAuth2AuthorizationRequest(ctx, w, r, authorizeRequest)
+	session, flow, err := h.r.ConsentStrategy().HandleOAuth2AuthorizationRequest(ctx, w, r, authorizeRequest)
 	if errors.Is(err, consent.ErrAbortOAuth2Request) {
 		x.LogAudit(r, nil, h.r.AuditLogger())
 		// do nothing
@@ -1049,6 +1136,8 @@ func (h *Handler) oAuth2Authorize(w http.ResponseWriter, r *http.Request, _ http
 		ConsentChallenge:      session.ID,
 		ExcludeNotBeforeClaim: h.c.ExcludeNotBeforeClaim(ctx),
 		AllowedTopLevelClaims: h.c.AllowedTopLevelClaims(ctx),
+		MirrorTopLevelClaims:  h.c.MirrorTopLevelClaims(ctx),
+		Flow:                  flow,
 	})
 	if err != nil {
 		x.LogError(r, err, h.r.Logger())
@@ -1062,6 +1151,8 @@ func (h *Handler) oAuth2Authorize(w http.ResponseWriter, r *http.Request, _ http
 // Delete OAuth 2.0 Access Token Parameters
 //
 // swagger:parameters deleteOAuth2Token
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type deleteOAuth2Token struct {
 	// OAuth 2.0 Client ID
 	//
@@ -1101,7 +1192,7 @@ func (h *Handler) deleteOAuth2Token(w http.ResponseWriter, r *http.Request, _ ht
 
 // This function will not be called, OPTIONS request will be handled by cors
 // this is just a placeholder.
-func (h *Handler) handleOptions(w http.ResponseWriter, r *http.Request) {}
+func (h *Handler) handleOptions(http.ResponseWriter, *http.Request) {}
 
 func (h *Handler) forwardError(w http.ResponseWriter, r *http.Request, err error) {
 	rfcErr := fosite.ErrorToRFC6749Error(err).WithExposeDebug(h.c.GetSendDebugMessagesToClients(r.Context()))
@@ -1124,4 +1215,168 @@ func (h *Handler) logOrAudit(err error, r *http.Request) {
 	} else {
 		x.LogAudit(r, err, h.r.Logger())
 	}
+}
+
+// swagger:route POST /credentials oidc createVerifiableCredential
+//
+// # Issues a Verifiable Credential
+//
+// This endpoint creates a verifiable credential that attests that the user
+// authenticated with the provided access token owns a certain public/private key
+// pair.
+//
+// More information can be found at
+// https://openid.net/specs/openid-connect-userinfo-vc-1_0.html.
+//
+//	Consumes:
+//	- application/json
+//
+//	Schemes: http, https
+//
+//	Responses:
+//	  200: verifiableCredentialResponse
+//	  400: verifiableCredentialPrimingResponse
+//	  default: errorOAuth2
+func (h *Handler) createVerifiableCredential(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	session := NewSessionWithCustomClaims(ctx, h.c, "")
+	accessToken := fosite.AccessTokenFromRequest(r)
+	tokenType, _, err := h.r.OAuth2Provider().IntrospectToken(ctx, accessToken, fosite.AccessToken, session)
+
+	if err != nil {
+		h.r.Writer().WriteError(w, r, err)
+		return
+	}
+	if tokenType != fosite.AccessToken {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("The provided token is not an access token.")))
+		return
+	}
+
+	var request CreateVerifiableCredentialRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithWrap(err).WithHint("Unable to decode request body.")))
+		return
+	}
+
+	if request.Format != "jwt_vc_json" {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("The format %q is not supported.", request.Format)))
+		return
+	}
+	if request.Proof == nil {
+		// Handle priming request
+		nonceLifespan := h.r.Config().GetVerifiableCredentialsNonceLifespan(ctx)
+		nonceExpiresIn := time.Now().Add(nonceLifespan).UTC()
+		nonce, err := h.r.OAuth2Storage().NewNonce(ctx, accessToken, nonceExpiresIn)
+		if err != nil {
+			h.r.Writer().WriteError(w, r, err)
+			return
+		}
+		h.r.Writer().WriteCode(w, r, http.StatusBadRequest, &VerifiableCredentialPrimingResponse{
+			RFC6749ErrorJson: fosite.RFC6749ErrorJson{
+				Name:        "missing_proof",
+				Description: "Could not issue a verifiable credential because the proof is missing in the request.",
+			},
+			Format:         "jwt_vc",
+			Nonce:          nonce,
+			NonceExpiresIn: int64(nonceLifespan.Seconds()),
+		})
+		return
+	}
+	if request.Proof.ProofType != "jwt" {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("The proof type %q is not supported.", request.Proof.ProofType)))
+		return
+	}
+
+	header, _, ok := strings.Cut(request.Proof.JWT, ".")
+	if !ok {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("The JWT in the proof is malformed.")))
+		return
+	}
+
+	rawHeader, err := jwtV5.NewParser().DecodeSegment(header)
+	if err != nil {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("The JWT header in the proof is malformed.")))
+		return
+	}
+	jwk := gjson.GetBytes(rawHeader, "jwk").String()
+	proofJWK, err := josex.LoadJSONWebKey([]byte(jwk), true)
+	if err != nil {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("The JWK in the JWT header is malformed.")))
+		return
+	}
+
+	token, err := jwt.Parse(request.Proof.JWT, func(token *jwt.Token) (any, error) {
+		return proofJWK, nil
+	})
+	if err != nil {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf("The JWT was not signed with the correct key supplied in the JWK header.")))
+		return
+	}
+
+	nonce, ok := token.Claims["nonce"].(string)
+	if !ok {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(fosite.ErrInvalidRequest.WithHintf(`The JWT did not contain the "nonce" claim.`)))
+		return
+	}
+
+	if err = h.r.OAuth2Storage().IsNonceValid(ctx, accessToken, nonce); err != nil {
+		h.r.Writer().WriteError(w, r, err)
+		return
+	}
+
+	var response VerifiableCredentialResponse
+	response.Format = "jwt_vc_json"
+
+	proofJWKJSON, err := json.Marshal(proofJWK)
+	if err != nil {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(err))
+		return
+	}
+
+	// Encode ID according to https://github.com/quartzjer/did-jwk/blob/main/spec.md
+	vcID := fmt.Sprintf("did:jwk:%s", base64.RawURLEncoding.EncodeToString(proofJWKJSON))
+	vcClaims := &VerifableCredentialClaims{
+		RegisteredClaims: jwtV5.RegisteredClaims{
+			Issuer:    session.Claims.Issuer,
+			ID:        stringsx.Coalesce(session.Claims.JTI, uuid.New()),
+			IssuedAt:  jwtV5.NewNumericDate(session.Claims.IssuedAt),
+			NotBefore: jwtV5.NewNumericDate(session.Claims.IssuedAt),
+			ExpiresAt: jwtV5.NewNumericDate(session.Claims.IssuedAt.Add(1 * time.Hour)),
+			Subject:   vcID,
+		},
+		VerifiableCredential: VerifiableCredentialClaim{
+			Context: []string{"https://www.w3.org/2018/credentials/v1"},
+			Type:    []string{"VerifiableCredential", "UserInfoCredential"},
+			Subject: map[string]any{
+				"id":  vcID,
+				"sub": session.Claims.Subject,
+			},
+		},
+	}
+	if session.Claims.Extra != nil {
+		for claim, val := range session.Claims.Extra {
+			vcClaims.VerifiableCredential.Subject[claim] = val
+		}
+	}
+
+	signingKeyID, err := h.r.OpenIDJWTStrategy().GetPublicKeyID(ctx)
+	if err != nil {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(err))
+		return
+	}
+	headers := jwt.NewHeaders()
+	headers.Add("kid", signingKeyID)
+	mapClaims, err := vcClaims.ToMapClaims()
+	if err != nil {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(err))
+		return
+	}
+	rawToken, _, err := h.r.OpenIDJWTStrategy().Generate(ctx, mapClaims, headers)
+	if err != nil {
+		h.r.Writer().WriteError(w, r, errorsx.WithStack(err))
+		return
+	}
+
+	response.Credential = rawToken
+	h.r.Writer().Write(w, r, &response)
 }
