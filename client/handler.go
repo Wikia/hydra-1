@@ -12,26 +12,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ory/x/pagination/tokenpagination"
-
-	"github.com/ory/x/httprouterx"
-
-	"github.com/ory/x/openapix"
-
-	"github.com/ory/x/uuidx"
-
-	"github.com/ory/x/jsonx"
-	"github.com/ory/x/urlx"
-
-	"github.com/ory/fosite"
-
-	"github.com/ory/x/errorsx"
-
-	"github.com/ory/herodot"
-	"github.com/ory/hydra/v2/x"
-
 	"github.com/julienschmidt/httprouter"
 	"github.com/pkg/errors"
+
+	"github.com/ory/fosite"
+	"github.com/ory/herodot"
+	"github.com/ory/hydra/v2/x"
+	"github.com/ory/x/errorsx"
+	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/jsonx"
+	"github.com/ory/x/openapix"
+	"github.com/ory/x/pagination/tokenpagination"
+	"github.com/ory/x/urlx"
+	"github.com/ory/x/uuidx"
 )
 
 type Handler struct {
@@ -67,6 +60,8 @@ func (h *Handler) SetRoutes(admin *httprouterx.RouterAdmin, public *httprouterx.
 // OAuth 2.0 Client Creation Parameters
 //
 // swagger:parameters createOAuth2Client
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type createOAuth2Client struct {
 	// OAuth 2.0 Client Request Body
 	//
@@ -97,7 +92,7 @@ type createOAuth2Client struct {
 func (h *Handler) createOAuth2Client(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	c, err := h.CreateClient(r, h.r.ClientValidator().Validate, false)
 	if err != nil {
-		h.r.Writer().WriteError(w, r, errorsx.WithStack(err))
+		h.r.Writer().WriteError(w, r, err)
 		return
 	}
 
@@ -107,6 +102,8 @@ func (h *Handler) createOAuth2Client(w http.ResponseWriter, r *http.Request, _ h
 // OpenID Connect Dynamic Client Registration Parameters
 //
 // swagger:parameters createOidcDynamicClient
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type createOidcDynamicClient struct {
 	// Dynamic Client Registration Request Body
 	//
@@ -160,21 +157,16 @@ func (h *Handler) createOidcDynamicClient(w http.ResponseWriter, r *http.Request
 func (h *Handler) CreateClient(r *http.Request, validator func(context.Context, *Client) error, isDynamic bool) (*Client, error) {
 	var c Client
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		return nil, err
+		return nil, errorsx.WithStack(herodot.ErrBadRequest.WithReasonf("Unable to decode the request body: %s", err))
 	}
 
 	if isDynamic {
 		if c.Secret != "" {
 			return nil, errorsx.WithStack(herodot.ErrBadRequest.WithReasonf("It is not allowed to choose your own OAuth2 Client secret."))
 		}
+		// We do not allow to set the client ID for dynamic clients.
+		c.ID = uuidx.NewV4().String()
 	}
-
-	if len(c.LegacyClientID) > 0 {
-		return nil, errorsx.WithStack(herodot.ErrBadRequest.WithReason("It is no longer possible to set an OAuth2 Client ID as a user. The system will generate a unique ID for you."))
-	}
-
-	c.ID = uuidx.NewV4()
-	c.LegacyClientID = c.ID.String()
 
 	if len(c.Secret) == 0 {
 		secretb, err := x.GenerateSecret(26)
@@ -214,6 +206,8 @@ func (h *Handler) CreateClient(r *http.Request, validator func(context.Context, 
 // Set OAuth 2.0 Client Parameters
 //
 // swagger:parameters setOAuth2Client
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type setOAuth2Client struct {
 	// OAuth 2.0 Client ID
 	//
@@ -260,7 +254,7 @@ func (h *Handler) setOAuth2Client(w http.ResponseWriter, r *http.Request, ps htt
 		return
 	}
 
-	c.LegacyClientID = ps.ByName("id")
+	c.ID = ps.ByName("id")
 	if err := h.updateClient(r.Context(), &c, h.r.ClientValidator().Validate); err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return
@@ -290,6 +284,8 @@ func (h *Handler) updateClient(ctx context.Context, c *Client, validator func(co
 // Set Dynamic Client Parameters
 //
 // swagger:parameters setOidcDynamicClient
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type setOidcDynamicClient struct {
 	// OAuth 2.0 Client ID
 	//
@@ -371,7 +367,7 @@ func (h *Handler) setOidcDynamicClient(w http.ResponseWriter, r *http.Request, p
 	c.RegistrationAccessToken = token
 	c.RegistrationAccessTokenSignature = signature
 
-	c.LegacyClientID = client.GetID()
+	c.ID = client.GetID()
 	if err := h.updateClient(r.Context(), &c, h.r.ClientValidator().ValidateDynamicRegistration); err != nil {
 		h.r.Writer().WriteError(w, r, err)
 		return
@@ -383,6 +379,8 @@ func (h *Handler) setOidcDynamicClient(w http.ResponseWriter, r *http.Request, p
 // Patch OAuth 2.0 Client Parameters
 //
 // swagger:parameters patchOAuth2Client
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type patchOAuth2Client struct {
 	// The id of the OAuth 2.0 Client.
 	//
@@ -460,6 +458,8 @@ func (h *Handler) patchOAuth2Client(w http.ResponseWriter, r *http.Request, ps h
 // Paginated OAuth2 Client List Response
 //
 // swagger:response listOAuth2Clients
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type listOAuth2ClientsResponse struct {
 	tokenpagination.ResponseHeaders
 
@@ -472,6 +472,8 @@ type listOAuth2ClientsResponse struct {
 // Paginated OAuth2 Client List Parameters
 //
 // swagger:parameters listOAuth2Clients
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type listOAuth2ClientsParameters struct {
 	tokenpagination.RequestParameters
 
@@ -540,6 +542,8 @@ func (h *Handler) listOAuth2Clients(w http.ResponseWriter, r *http.Request, ps h
 // Get OAuth2 Client Parameters
 //
 // swagger:parameters getOAuth2Client
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type adminGetOAuth2Client struct {
 	// The id of the OAuth 2.0 Client.
 	//
@@ -583,6 +587,8 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request, ps httprouter.Para
 // Get OpenID Connect Dynamic Client Parameters
 //
 // swagger:parameters getOidcDynamicClient
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type getOidcDynamicClient struct {
 	// The id of the OAuth 2.0 Client.
 	//
@@ -644,6 +650,8 @@ func (h *Handler) getOidcDynamicClient(w http.ResponseWriter, r *http.Request, p
 // Delete OAuth2 Client Parameters
 //
 // swagger:parameters deleteOAuth2Client
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type deleteOAuth2Client struct {
 	// The id of the OAuth 2.0 Client.
 	//
@@ -687,6 +695,8 @@ func (h *Handler) deleteOAuth2Client(w http.ResponseWriter, r *http.Request, ps 
 // Set OAuth 2.0 Client Token Lifespans
 //
 // swagger:parameters setOAuth2ClientLifespans
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type setOAuth2ClientLifespans struct {
 	// OAuth 2.0 Client ID
 	//
@@ -738,6 +748,8 @@ func (h *Handler) setOAuth2ClientLifespans(w http.ResponseWriter, r *http.Reques
 }
 
 // swagger:parameters deleteOidcDynamicClient
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type dynamicClientRegistrationDeleteOAuth2Client struct {
 	// The id of the OAuth 2.0 Client.
 	//

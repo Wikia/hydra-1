@@ -5,9 +5,17 @@ package driver
 
 import (
 	"context"
+	"io/fs"
+	"net/http"
 
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/ory/hydra/v2/fositex"
+	"github.com/ory/hydra/v2/internal/kratos"
 	"github.com/ory/x/httprouterx"
+	"github.com/ory/x/popx"
 
+	"github.com/ory/hydra/v2/aead"
 	"github.com/ory/hydra/v2/hsm"
 	"github.com/ory/x/contextx"
 
@@ -40,15 +48,22 @@ import (
 type Registry interface {
 	dbal.Driver
 
-	Init(ctx context.Context, skipNetworkInit bool, migrate bool, ctxer contextx.Contextualizer) error
+	Init(ctx context.Context, skipNetworkInit bool, migrate bool, ctxer contextx.Contextualizer, extraMigrations []fs.FS, goMigrations []popx.Migration) error
 
 	WithBuildInfo(v, h, d string) Registry
 	WithConfig(c *config.DefaultProvider) Registry
 	WithContextualizer(ctxer contextx.Contextualizer) Registry
 	WithLogger(l *logrusx.Logger) Registry
+	WithTracer(t trace.Tracer) Registry
+	WithTracerWrapper(TracerWrapper) Registry
+	WithKratos(k kratos.Client) Registry
 	x.HTTPClientProvider
 	GetJWKSFetcherStrategy() fosite.JWKSFetcherStrategy
 
+	WithExtraFositeFactories(f []fositex.Factory) Registry
+	ExtraFositeFactories() []fositex.Factory
+
+	contextx.Provider
 	config.Provider
 	persistence.Provider
 	x.RegistryLogger
@@ -61,6 +76,9 @@ type Registry interface {
 	oauth2.Registry
 	PrometheusManager() *prometheus.MetricsManager
 	x.TracingProvider
+	FlowCipher() *aead.XChaCha20Poly1305
+
+	kratos.Provider
 
 	RegisterRoutes(ctx context.Context, admin *httprouterx.RouterAdmin, public *httprouterx.RouterPublic)
 	ClientHandler() *client.Handler
@@ -68,6 +86,7 @@ type Registry interface {
 	ConsentHandler() *consent.Handler
 	OAuth2Handler() *oauth2.Handler
 	HealthHandler() *healthx.Handler
+	OAuth2AwareMiddleware() func(h http.Handler) http.Handler
 
 	OAuth2HMACStrategy() *foauth2.HMACSHAStrategy
 	WithOAuth2Provider(f fosite.OAuth2Provider)
@@ -80,7 +99,7 @@ func NewRegistryFromDSN(ctx context.Context, c *config.DefaultProvider, l *logru
 	if err != nil {
 		return nil, err
 	}
-	if err := registry.Init(ctx, skipNetworkInit, migrate, ctxer); err != nil {
+	if err := registry.Init(ctx, skipNetworkInit, migrate, ctxer, nil, nil); err != nil {
 		return nil, err
 	}
 	return registry, nil
@@ -109,6 +128,7 @@ func CallRegistry(ctx context.Context, r Registry) {
 	r.SubjectIdentifierAlgorithm(ctx)
 	r.KeyManager()
 	r.KeyCipher()
+	r.FlowCipher()
 	r.OAuth2Storage()
 	r.OAuth2Provider()
 	r.AudienceStrategy()

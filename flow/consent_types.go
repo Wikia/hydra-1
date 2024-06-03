@@ -1,7 +1,7 @@
 // Copyright © 2022 Ory Corp
 // SPDX-License-Identifier: Apache-2.0
 
-package consent
+package flow
 
 import (
 	"database/sql"
@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	consentRequestDeniedErrorName = "consent request denied"
-	loginRequestDeniedErrorName   = "login request denied"
+	ConsentRequestDeniedErrorName = "consent request denied"
+	LoginRequestDeniedErrorName   = "login request denied"
 )
 
 // OAuth 2.0 Redirect Browser To
@@ -42,14 +42,15 @@ type OAuth2RedirectTo struct {
 
 // swagger:ignore
 type LoginSession struct {
-	ID              string         `db:"id"`
-	NID             uuid.UUID      `db:"nid"`
-	AuthenticatedAt sqlxx.NullTime `db:"authenticated_at"`
-	Subject         string         `db:"subject"`
-	Remember        bool           `db:"remember"`
+	ID                        string           `db:"id"`
+	NID                       uuid.UUID        `db:"nid"`
+	AuthenticatedAt           sqlxx.NullTime   `db:"authenticated_at"`
+	Subject                   string           `db:"subject"`
+	IdentityProviderSessionID sqlxx.NullString `db:"identity_provider_session_id"`
+	Remember                  bool             `db:"remember"`
 }
 
-func (_ LoginSession) TableName() string {
+func (LoginSession) TableName() string {
 	return "hydra_oauth2_authentication_session"
 }
 
@@ -77,11 +78,12 @@ type RequestDeniedError struct {
 	// to the public but only in the server logs.
 	Debug string `json:"error_debug"`
 
-	valid bool
+	// swagger:ignore
+	Valid bool `json:"valid"`
 }
 
 func (e *RequestDeniedError) IsError() bool {
-	return e != nil && e.valid
+	return e != nil && e.Valid
 }
 
 func (e *RequestDeniedError) SetDefaults(name string) {
@@ -94,7 +96,7 @@ func (e *RequestDeniedError) SetDefaults(name string) {
 	}
 }
 
-func (e *RequestDeniedError) toRFCError() *fosite.RFC6749Error {
+func (e *RequestDeniedError) ToRFCError() *fosite.RFC6749Error {
 	if e.Name == "" {
 		e.Name = "request_denied"
 	}
@@ -112,7 +114,7 @@ func (e *RequestDeniedError) toRFCError() *fosite.RFC6749Error {
 	}
 }
 
-func (e *RequestDeniedError) Scan(value interface{}) error {
+func (e *RequestDeniedError) Scan(value any) error {
 	v := fmt.Sprintf("%s", value)
 	if len(v) == 0 || v == "{}" {
 		return nil
@@ -122,7 +124,7 @@ func (e *RequestDeniedError) Scan(value interface{}) error {
 		return errorsx.WithStack(err)
 	}
 
-	e.valid = true
+	e.Valid = true
 	return nil
 }
 
@@ -172,6 +174,11 @@ type AcceptOAuth2ConsentRequest struct {
 	// the flow.
 	WasHandled bool `json:"-"`
 
+	// Context is an optional object which can hold arbitrary data. The data will be made available when fetching the
+	// consent request under the "context" field. This is useful in scenarios where login and consent endpoints share
+	// data.
+	Context sqlxx.JSONRawMessage `json:"context"`
+
 	ConsentRequest  *OAuth2ConsentRequest `json:"-"`
 	Error           *RequestDeniedError   `json:"-"`
 	RequestedAt     time.Time             `json:"-"`
@@ -181,6 +188,25 @@ type AcceptOAuth2ConsentRequest struct {
 	SessionAccessToken sqlxx.MapStringInterface `json:"-" faker:"-"`
 }
 
+func (r *AcceptOAuth2ConsentRequest) MarshalJSON() ([]byte, error) {
+	type Alias AcceptOAuth2ConsentRequest
+	alias := Alias(*r)
+
+	if alias.Context == nil {
+		alias.Context = []byte("{}")
+	}
+
+	if alias.GrantedScope == nil {
+		alias.GrantedScope = []string{}
+	}
+
+	if alias.GrantedAudience == nil {
+		alias.GrantedAudience = []string{}
+	}
+
+	return json.Marshal(alias)
+}
+
 func (r *AcceptOAuth2ConsentRequest) HasError() bool {
 	return r.Error.IsError()
 }
@@ -188,6 +214,8 @@ func (r *AcceptOAuth2ConsentRequest) HasError() bool {
 // List of OAuth 2.0 Consent Sessions
 //
 // swagger:model oAuth2ConsentSessions
+//
+//lint:ignore U1000 Used to generate Swagger and OpenAPI definitions
 type oAuth2ConsentSessions []OAuth2ConsentSession
 
 // OAuth 2.0 Consent Session
@@ -236,6 +264,11 @@ type OAuth2ConsentSession struct {
 	// the flow.
 	WasHandled bool `json:"-" db:"was_used"`
 
+	// Context is an optional object which can hold arbitrary data. The data will be made available when fetching the
+	// consent request under the "context" field. This is useful in scenarios where login and consent endpoints share
+	// data.
+	Context sqlxx.JSONRawMessage `json:"context"`
+
 	// Consent Request
 	//
 	// The consent request that lead to this consent session.
@@ -247,6 +280,25 @@ type OAuth2ConsentSession struct {
 
 	SessionIDToken     sqlxx.MapStringInterface `db:"session_id_token" json:"-"`
 	SessionAccessToken sqlxx.MapStringInterface `db:"session_access_token" json:"-"`
+}
+
+func (r *OAuth2ConsentSession) MarshalJSON() ([]byte, error) {
+	type Alias OAuth2ConsentSession
+	alias := Alias(*r)
+
+	if alias.Context == nil {
+		alias.Context = []byte("{}")
+	}
+
+	if alias.GrantedScope == nil {
+		alias.GrantedScope = []string{}
+	}
+
+	if alias.GrantedAudience == nil {
+		alias.GrantedAudience = []string{}
+	}
+
+	return json.Marshal(alias)
 }
 
 // HandledLoginRequest is the request payload used to accept a login request.
@@ -289,6 +341,12 @@ type HandledLoginRequest struct {
 	// required: true
 	Subject string `json:"subject"`
 
+	// IdentityProviderSessionID is the session ID of the end-user that authenticated.
+	// If specified, we will use this value to propagate the logout.
+	//
+	// required: false
+	IdentityProviderSessionID string `json:"identity_provider_session_id,omitempty"`
+
 	// ForceSubjectIdentifier forces the "pairwise" user ID of the end-user that authenticated. The "pairwise" user ID refers to the
 	// (Pairwise Identifier Algorithm)[http://openid.net/specs/openid-connect-core-1_0.html#PairwiseAlg] of the OpenID
 	// Connect specification. It allows you to set an obfuscated subject ("user") identifier that is unique to the client.
@@ -323,6 +381,20 @@ type HandledLoginRequest struct {
 	Error           *RequestDeniedError `json:"-"`
 	RequestedAt     time.Time           `json:"-"`
 	AuthenticatedAt sqlxx.NullTime      `json:"-"`
+}
+
+func (r *HandledLoginRequest) MarshalJSON() ([]byte, error) {
+	type Alias HandledLoginRequest
+	alias := Alias(*r)
+	if alias.Context == nil {
+		alias.Context = []byte("{}")
+	}
+
+	if alias.AMR == nil {
+		alias.AMR = []string{}
+	}
+
+	return json.Marshal(alias)
 }
 
 func (r *HandledLoginRequest) HasError() bool {
@@ -370,6 +442,24 @@ type OAuth2ConsentRequestOpenIDConnectContext struct {
 	// and then wants to pass that value as a hint to the discovered authorization service. This value MAY also be a
 	// phone number in the format specified for the phone_number Claim. The use of this parameter is optional.
 	LoginHint string `json:"login_hint,omitempty"`
+}
+
+func (n *OAuth2ConsentRequestOpenIDConnectContext) MarshalJSON() ([]byte, error) {
+	type Alias OAuth2ConsentRequestOpenIDConnectContext
+	alias := Alias(*n)
+	if alias.IDTokenHintClaims == nil {
+		alias.IDTokenHintClaims = map[string]interface{}{}
+	}
+
+	if alias.ACRValues == nil {
+		alias.ACRValues = []string{}
+	}
+
+	if alias.UILocales == nil {
+		alias.UILocales = []string{}
+	}
+
+	return json.Marshal(alias)
 }
 
 func (n *OAuth2ConsentRequestOpenIDConnectContext) Scan(value interface{}) error {
@@ -420,7 +510,7 @@ type LogoutRequest struct {
 	Client                *client.Client `json:"client" db:"-"`
 }
 
-func (_ LogoutRequest) TableName() string {
+func (LogoutRequest) TableName() string {
 	return "hydra_oauth2_logout_request"
 }
 
@@ -461,13 +551,9 @@ type LoginRequest struct {
 	ID string `json:"challenge"`
 
 	// RequestedScope contains the OAuth 2.0 Scope requested by the OAuth 2.0 Client.
-	//
-	// required: true
 	RequestedScope sqlxx.StringSliceJSONFormat `json:"requested_scope"`
 
 	// RequestedAudience contains the access token audience as requested by the OAuth 2.0 Client.
-	//
-	// required: true
 	RequestedAudience sqlxx.StringSliceJSONFormat `json:"requested_access_token_audience"`
 
 	// Skip, if true, implies that the client has requested the same scopes from the same user previously.
@@ -521,6 +607,20 @@ type LoginRequest struct {
 
 	AuthenticatedAt sqlxx.NullTime `json:"-"`
 	RequestedAt     time.Time      `json:"-"`
+}
+
+func (r *LoginRequest) MarshalJSON() ([]byte, error) {
+	type Alias LoginRequest
+	alias := Alias(*r)
+	if alias.RequestedScope == nil {
+		alias.RequestedScope = []string{}
+	}
+
+	if alias.RequestedAudience == nil {
+		alias.RequestedAudience = []string{}
+	}
+
+	return json.Marshal(alias)
 }
 
 // Contains information on an ongoing consent request.
@@ -598,6 +698,24 @@ type OAuth2ConsentRequest struct {
 	RequestedAt            time.Time      `json:"-"`
 }
 
+func (r *OAuth2ConsentRequest) MarshalJSON() ([]byte, error) {
+	type Alias OAuth2ConsentRequest
+	alias := Alias(*r)
+	if alias.RequestedScope == nil {
+		alias.RequestedScope = []string{}
+	}
+
+	if alias.RequestedAudience == nil {
+		alias.RequestedAudience = []string{}
+	}
+
+	if alias.AMR == nil {
+		alias.AMR = []string{}
+	}
+
+	return json.Marshal(alias)
+}
+
 // Pass session data to a consent request.
 //
 // swagger:model acceptOAuth2ConsentRequestSession
@@ -619,4 +737,17 @@ func NewConsentRequestSessionData() *AcceptOAuth2ConsentRequestSession {
 		AccessToken: map[string]interface{}{},
 		IDToken:     map[string]interface{}{},
 	}
+}
+
+func (r *AcceptOAuth2ConsentRequestSession) MarshalJSON() ([]byte, error) {
+	type Alias AcceptOAuth2ConsentRequestSession
+	alias := Alias(*r)
+	if alias.AccessToken == nil {
+		alias.AccessToken = map[string]interface{}{}
+	}
+
+	if alias.IDToken == nil {
+		alias.IDToken = map[string]interface{}{}
+	}
+	return json.Marshal(alias)
 }

@@ -5,22 +5,34 @@ package driver
 
 import (
 	"context"
+	"io/fs"
 
 	"github.com/ory/hydra/v2/driver/config"
+	"github.com/ory/hydra/v2/fositex"
 	"github.com/ory/x/configx"
-	"github.com/ory/x/contextx"
 	"github.com/ory/x/logrusx"
+	"github.com/ory/x/otelx"
+	"github.com/ory/x/popx"
 	"github.com/ory/x/servicelocatorx"
 )
 
-type options struct {
-	preload  bool
-	validate bool
-	opts     []configx.OptionModifier
-	config   *config.DefaultProvider
-	// The first default refers to determining the NID at startup; the second default referes to the fact that the Contextualizer may dynamically change the NID.
-	skipNetworkInit bool
-}
+type (
+	options struct {
+		preload  bool
+		validate bool
+		opts     []configx.OptionModifier
+		config   *config.DefaultProvider
+		// The first default refers to determining the NID at startup; the second default referes to the fact that the Contextualizer may dynamically change the NID.
+		skipNetworkInit  bool
+		tracerWrapper    TracerWrapper
+		extraMigrations  []fs.FS
+		goMigrations     []popx.Migration
+		fositexFactories []fositex.Factory
+	}
+	OptionsModifier func(*options)
+
+	TracerWrapper func(*otelx.Tracer) *otelx.Tracer
+)
 
 func newOptions() *options {
 	return &options{
@@ -30,13 +42,11 @@ func newOptions() *options {
 	}
 }
 
-func WithConfig(config *config.DefaultProvider) func(o *options) {
+func WithConfig(config *config.DefaultProvider) OptionsModifier {
 	return func(o *options) {
 		o.config = config
 	}
 }
-
-type OptionsModifier func(*options)
 
 func WithOptions(opts ...configx.OptionModifier) OptionsModifier {
 	return func(o *options) {
@@ -63,6 +73,32 @@ func DisablePreloading() OptionsModifier {
 func SkipNetworkInit() OptionsModifier {
 	return func(o *options) {
 		o.skipNetworkInit = true
+	}
+}
+
+// WithTracerWrapper sets a function that wraps the tracer.
+func WithTracerWrapper(wrapper TracerWrapper) OptionsModifier {
+	return func(o *options) {
+		o.tracerWrapper = wrapper
+	}
+}
+
+// WithExtraMigrations specifies additional database migration.
+func WithExtraMigrations(m ...fs.FS) OptionsModifier {
+	return func(o *options) {
+		o.extraMigrations = append(o.extraMigrations, m...)
+	}
+}
+
+func WithGoMigrations(m ...popx.Migration) OptionsModifier {
+	return func(o *options) {
+		o.goMigrations = append(o.goMigrations, m...)
+	}
+}
+
+func WithExtraFositeFactories(f ...fositex.Factory) OptionsModifier {
+	return func(o *options) {
+		o.fositexFactories = append(o.fositexFactories, f...)
 	}
 }
 
@@ -94,13 +130,19 @@ func New(ctx context.Context, sl *servicelocatorx.Options, opts []OptionsModifie
 		}
 	}
 
-	r, err := NewRegistryFromDSN(ctx, c, l, o.skipNetworkInit, false, ctxter)
+	r, err := NewRegistryWithoutInit(c, l)
 	if err != nil {
 		l.WithError(err).Error("Unable to create service registry.")
 		return nil, err
 	}
 
-	if err = r.Init(ctx, o.skipNetworkInit, false, &contextx.Default{}); err != nil {
+	if o.tracerWrapper != nil {
+		r.WithTracerWrapper(o.tracerWrapper)
+	}
+
+	r.WithExtraFositeFactories(o.fositexFactories)
+
+	if err = r.Init(ctx, o.skipNetworkInit, false, ctxter, o.extraMigrations, o.goMigrations); err != nil {
 		l.WithError(err).Error("Unable to initialize service registry.")
 		return nil, err
 	}

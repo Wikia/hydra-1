@@ -12,12 +12,15 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"github.com/ory/x/otelx/semconv"
+
 	"github.com/ory/x/servicelocatorx"
 
-	"github.com/ory/x/corsx"
 	"github.com/ory/x/httprouterx"
 
-	analytics "github.com/ory/analytics-go/v4"
+	"github.com/ory/analytics-go/v5"
 	"github.com/ory/x/configx"
 
 	"github.com/ory/x/reqlog"
@@ -46,7 +49,7 @@ import (
 
 var _ = &consent.Handler{}
 
-func EnhanceMiddleware(ctx context.Context, sl *servicelocatorx.Options, d driver.Registry, n *negroni.Negroni, address string, router *httprouter.Router, enableCORS bool, iface config.ServeInterface) http.Handler {
+func EnhanceMiddleware(ctx context.Context, sl *servicelocatorx.Options, d driver.Registry, n *negroni.Negroni, address string, router *httprouter.Router, iface config.ServeInterface) http.Handler {
 	if !networkx.AddressIsUnixSocket(address) {
 		n.UseFunc(x.RejectInsecureRequests(d, d.Config().TLS(ctx, iface)))
 	}
@@ -54,16 +57,21 @@ func EnhanceMiddleware(ctx context.Context, sl *servicelocatorx.Options, d drive
 	for _, mw := range sl.HTTPMiddlewares() {
 		n.UseFunc(mw)
 	}
+	n.UseFunc(func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+		cfg, enabled := d.Config().CORS(r.Context(), iface)
+		if !enabled {
+			next(w, r)
+			return
+		}
+		cors.New(cfg).ServeHTTP(w, r, next)
+	})
 
 	n.UseHandler(router)
-	corsx.ContextualizedMiddleware(func(ctx context.Context) (opts cors.Options, enabled bool) {
-		return d.Config().CORS(ctx, iface)
-	})
 
 	return n
 }
 
-func isDSNAllowed(ctx context.Context, r driver.Registry) {
+func ensureNoMemoryDSN(r driver.Registry) {
 	if r.Config().DSN() == "memory" {
 		r.Logger().Fatalf(`When using "hydra serve admin" or "hydra serve public" the DSN can not be set to "memory".`)
 	}
@@ -74,11 +82,11 @@ func RunServeAdmin(slOpts []servicelocatorx.Option, dOpts []driver.OptionsModifi
 		ctx := cmd.Context()
 		sl := servicelocatorx.NewOptions(slOpts...)
 
-		d, err := driver.New(cmd.Context(), sl, append(dOpts, driver.WithOptions(configx.WithFlags(cmd.Flags()))))
+		d, err := driver.New(cmd.Context(), sl, append(dOpts, driver.WithOptions(append(cOpts, configx.WithFlags(cmd.Flags()))...)))
 		if err != nil {
 			return err
 		}
-		isDSNAllowed(ctx, d)
+		ensureNoMemoryDSN(d)
 
 		admin, _, adminmw, _ := setup(ctx, d, cmd)
 		d.PrometheusManager().RegisterRouter(admin.Router)
@@ -92,7 +100,7 @@ func RunServeAdmin(slOpts []servicelocatorx.Option, dOpts []driver.OptionsModifi
 			cmd,
 			&wg,
 			config.AdminInterface,
-			EnhanceMiddleware(ctx, sl, d, adminmw, d.Config().ListenOn(config.AdminInterface), admin.Router, true, config.AdminInterface),
+			EnhanceMiddleware(ctx, sl, d, adminmw, d.Config().ListenOn(config.AdminInterface), admin.Router, config.AdminInterface),
 			d.Config().ListenOn(config.AdminInterface),
 			d.Config().SocketPermission(config.AdminInterface),
 		)
@@ -107,11 +115,11 @@ func RunServePublic(slOpts []servicelocatorx.Option, dOpts []driver.OptionsModif
 		ctx := cmd.Context()
 		sl := servicelocatorx.NewOptions(slOpts...)
 
-		d, err := driver.New(cmd.Context(), sl, append(dOpts, driver.WithOptions(configx.WithFlags(cmd.Flags()))))
+		d, err := driver.New(cmd.Context(), sl, append(dOpts, driver.WithOptions(append(cOpts, configx.WithFlags(cmd.Flags()))...)))
 		if err != nil {
 			return err
 		}
-		isDSNAllowed(ctx, d)
+		ensureNoMemoryDSN(d)
 
 		_, public, _, publicmw := setup(ctx, d, cmd)
 		d.PrometheusManager().RegisterRouter(public.Router)
@@ -125,7 +133,7 @@ func RunServePublic(slOpts []servicelocatorx.Option, dOpts []driver.OptionsModif
 			cmd,
 			&wg,
 			config.PublicInterface,
-			EnhanceMiddleware(ctx, sl, d, publicmw, d.Config().ListenOn(config.PublicInterface), public.Router, false, config.PublicInterface),
+			EnhanceMiddleware(ctx, sl, d, publicmw, d.Config().ListenOn(config.PublicInterface), public.Router, config.PublicInterface),
 			d.Config().ListenOn(config.PublicInterface),
 			d.Config().SocketPermission(config.PublicInterface),
 		)
@@ -140,7 +148,7 @@ func RunServeAll(slOpts []servicelocatorx.Option, dOpts []driver.OptionsModifier
 		ctx := cmd.Context()
 		sl := servicelocatorx.NewOptions(slOpts...)
 
-		d, err := driver.New(cmd.Context(), sl, append(dOpts, driver.WithOptions(configx.WithFlags(cmd.Flags()))))
+		d, err := driver.New(cmd.Context(), sl, append(dOpts, driver.WithOptions(append(cOpts, configx.WithFlags(cmd.Flags()))...)))
 		if err != nil {
 			return err
 		}
@@ -159,7 +167,7 @@ func RunServeAll(slOpts []servicelocatorx.Option, dOpts []driver.OptionsModifier
 			cmd,
 			&wg,
 			config.PublicInterface,
-			EnhanceMiddleware(ctx, sl, d, publicmw, d.Config().ListenOn(config.PublicInterface), public.Router, false, config.PublicInterface),
+			EnhanceMiddleware(ctx, sl, d, publicmw, d.Config().ListenOn(config.PublicInterface), public.Router, config.PublicInterface),
 			d.Config().ListenOn(config.PublicInterface),
 			d.Config().SocketPermission(config.PublicInterface),
 		)
@@ -170,7 +178,7 @@ func RunServeAll(slOpts []servicelocatorx.Option, dOpts []driver.OptionsModifier
 			cmd,
 			&wg,
 			config.AdminInterface,
-			EnhanceMiddleware(ctx, sl, d, adminmw, d.Config().ListenOn(config.AdminInterface), admin.Router, true, config.AdminInterface),
+			EnhanceMiddleware(ctx, sl, d, adminmw, d.Config().ListenOn(config.AdminInterface), admin.Router, config.AdminInterface),
 			d.Config().ListenOn(config.AdminInterface),
 			d.Config().SocketPermission(config.AdminInterface),
 		)
@@ -201,9 +209,10 @@ func setup(ctx context.Context, d driver.Registry, cmd *cobra.Command) (admin *h
 		NewMiddlewareFromLogger(d.Logger(),
 			fmt.Sprintf("hydra/admin: %s", d.Config().IssuerURL(ctx).String()))
 	if d.Config().DisableHealthAccessLog(config.AdminInterface) {
-		adminLogger = adminLogger.ExcludePaths(healthx.AliveCheckPath, healthx.ReadyCheckPath)
+		adminLogger = adminLogger.ExcludePaths(healthx.AliveCheckPath, healthx.ReadyCheckPath, "/admin"+prometheus.MetricsPrometheusPath)
 	}
 
+	adminmw.UseFunc(semconv.Middleware)
 	adminmw.Use(adminLogger)
 	adminmw.Use(d.PrometheusManager())
 
@@ -215,6 +224,7 @@ func setup(ctx context.Context, d driver.Registry, cmd *cobra.Command) (admin *h
 		publicLogger.ExcludePaths(healthx.AliveCheckPath, healthx.ReadyCheckPath)
 	}
 
+	publicmw.UseFunc(semconv.Middleware)
 	publicmw.Use(publicLogger)
 	publicmw.Use(d.PrometheusManager())
 
@@ -223,11 +233,8 @@ func setup(ctx context.Context, d driver.Registry, cmd *cobra.Command) (admin *h
 		d.Logger(),
 		d.Config().Source(ctx),
 		&metricsx.Options{
-			Service: "ory-hydra",
-			ClusterID: metricsx.Hash(fmt.Sprintf("%s|%s",
-				d.Config().IssuerURL(ctx).String(),
-				d.Config().DSN(),
-			)),
+			Service:      "hydra",
+			DeploymentId: metricsx.Hash(d.Persister().NetworkID(ctx).String()),
 			IsDevelopment: d.Config().DSN() == "memory" ||
 				d.Config().IssuerURL(ctx).String() == "" ||
 				strings.Contains(d.Config().IssuerURL(ctx).String(), "localhost"),
@@ -310,7 +317,13 @@ func serve(
 	defer wg.Done()
 
 	if tracer := d.Tracer(cmd.Context()); tracer.IsLoaded() {
-		handler = otelx.TraceHandler(handler)
+		handler = otelx.TraceHandler(
+			handler,
+			otelhttp.WithTracerProvider(tracer.Provider()),
+			otelhttp.WithFilter(func(r *http.Request) bool {
+				return !strings.HasPrefix(r.URL.Path, "/admin/metrics/")
+			}),
+		)
 	}
 
 	var tlsConfig *tls.Config

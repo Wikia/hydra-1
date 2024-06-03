@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v3"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
-	"gopkg.in/square/go-jose.v2"
 
 	"github.com/ory/fosite/token/jwt"
-	"github.com/ory/hydra/v2/consent"
+	"github.com/ory/hydra/v2/flow"
 	"github.com/ory/hydra/v2/jwk"
 	hydraoauth2 "github.com/ory/hydra/v2/oauth2"
 	"github.com/ory/hydra/v2/oauth2/trust"
@@ -342,7 +342,7 @@ func TestJWTBearer(t *testing.T) {
 					}
 
 					hookResp := hydraoauth2.TokenHookResponse{
-						Session: consent.AcceptOAuth2ConsentRequestSession{
+						Session: flow.AcceptOAuth2ConsentRequestSession{
 							AccessToken: claims,
 							IDToken:     claims,
 						},
@@ -354,9 +354,9 @@ func TestJWTBearer(t *testing.T) {
 				defer hs.Close()
 
 				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
-				reg.Config().MustSet(ctx, config.KeyTokenHookURL, hs.URL)
+				reg.Config().MustSet(ctx, config.KeyTokenHook, hs.URL)
 
-				defer reg.Config().MustSet(ctx, config.KeyTokenHookURL, nil)
+				defer reg.Config().MustSet(ctx, config.KeyTokenHook, nil)
 
 				conf := newConf(client)
 				conf.EndpointParams = url.Values{"grant_type": {grantType}, "assertion": {token}}
@@ -417,7 +417,7 @@ func TestJWTBearer(t *testing.T) {
 					}
 
 					hookResp := hydraoauth2.TokenHookResponse{
-						Session: consent.AcceptOAuth2ConsentRequestSession{
+						Session: flow.AcceptOAuth2ConsentRequestSession{
 							AccessToken: claims,
 							IDToken:     claims,
 						},
@@ -429,9 +429,9 @@ func TestJWTBearer(t *testing.T) {
 				defer hs.Close()
 
 				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
-				reg.Config().MustSet(ctx, config.KeyTokenHookURL, hs.URL)
+				reg.Config().MustSet(ctx, config.KeyTokenHook, hs.URL)
 
-				defer reg.Config().MustSet(ctx, config.KeyTokenHookURL, nil)
+				defer reg.Config().MustSet(ctx, config.KeyTokenHook, nil)
 
 				conf := newConf(client)
 				conf.AuthStyle = goauth2.AuthStyleInParams
@@ -457,9 +457,9 @@ func TestJWTBearer(t *testing.T) {
 				defer hs.Close()
 
 				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
-				reg.Config().MustSet(ctx, config.KeyTokenHookURL, hs.URL)
+				reg.Config().MustSet(ctx, config.KeyTokenHook, hs.URL)
 
-				defer reg.Config().MustSet(ctx, config.KeyTokenHookURL, nil)
+				defer reg.Config().MustSet(ctx, config.KeyTokenHook, nil)
 
 				token, _, err := signer.Generate(ctx, jwt.MapClaims{
 					"jti": uuid.NewString(),
@@ -492,9 +492,9 @@ func TestJWTBearer(t *testing.T) {
 				defer hs.Close()
 
 				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
-				reg.Config().MustSet(ctx, config.KeyTokenHookURL, hs.URL)
+				reg.Config().MustSet(ctx, config.KeyTokenHook, hs.URL)
 
-				defer reg.Config().MustSet(ctx, config.KeyTokenHookURL, nil)
+				defer reg.Config().MustSet(ctx, config.KeyTokenHook, nil)
 
 				token, _, err := signer.Generate(ctx, jwt.MapClaims{
 					"jti": uuid.NewString(),
@@ -527,9 +527,9 @@ func TestJWTBearer(t *testing.T) {
 				defer hs.Close()
 
 				reg.Config().MustSet(ctx, config.KeyAccessTokenStrategy, strategy)
-				reg.Config().MustSet(ctx, config.KeyTokenHookURL, hs.URL)
+				reg.Config().MustSet(ctx, config.KeyTokenHook, hs.URL)
 
-				defer reg.Config().MustSet(ctx, config.KeyTokenHookURL, nil)
+				defer reg.Config().MustSet(ctx, config.KeyTokenHook, nil)
 
 				token, _, err := signer.Generate(ctx, jwt.MapClaims{
 					"jti": uuid.NewString(),

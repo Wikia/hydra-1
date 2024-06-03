@@ -5,6 +5,7 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**CreateOidcDynamicClient**](OidcApi.md#CreateOidcDynamicClient) | **Post** /oauth2/register | Register OAuth2 Client using OpenID Dynamic Client Registration
+[**CreateVerifiableCredential**](OidcApi.md#CreateVerifiableCredential) | **Post** /credentials | Issues a Verifiable Credential
 [**DeleteOidcDynamicClient**](OidcApi.md#DeleteOidcDynamicClient) | **Delete** /oauth2/register/{id} | Delete OAuth 2.0 Client using the OpenID Dynamic Client Registration Management Protocol
 [**DiscoverOidcConfiguration**](OidcApi.md#DiscoverOidcConfiguration) | **Get** /.well-known/openid-configuration | OpenID Connect Discovery
 [**GetOidcDynamicClient**](OidcApi.md#GetOidcDynamicClient) | **Get** /oauth2/register/{id} | Get OAuth2 Client using OpenID Dynamic Client Registration
@@ -28,24 +29,24 @@ Register OAuth2 Client using OpenID Dynamic Client Registration
 package main
 
 import (
-    "context"
-    "fmt"
-    "os"
-    openapiclient "./openapi"
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/ory/hydra-client-go/v2"
 )
 
 func main() {
-    oAuth2Client := *openapiclient.NewOAuth2Client() // OAuth2Client | Dynamic Client Registration Request Body
+	oAuth2Client := *openapiclient.NewOAuth2Client() // OAuth2Client | Dynamic Client Registration Request Body
 
-    configuration := openapiclient.NewConfiguration()
-    apiClient := openapiclient.NewAPIClient(configuration)
-    resp, r, err := apiClient.OidcApi.CreateOidcDynamicClient(context.Background()).OAuth2Client(oAuth2Client).Execute()
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.CreateOidcDynamicClient``: %v\n", err)
-        fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
-    }
-    // response from `CreateOidcDynamicClient`: OAuth2Client
-    fmt.Fprintf(os.Stdout, "Response from `OidcApi.CreateOidcDynamicClient`: %v\n", resp)
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	resp, r, err := apiClient.OidcApi.CreateOidcDynamicClient(context.Background()).OAuth2Client(oAuth2Client).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.CreateOidcDynamicClient``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+	// response from `CreateOidcDynamicClient`: OAuth2Client
+	fmt.Fprintf(os.Stdout, "Response from `OidcApi.CreateOidcDynamicClient`: %v\n", resp)
 }
 ```
 
@@ -80,6 +81,72 @@ No authorization required
 [[Back to README]](../README.md)
 
 
+## CreateVerifiableCredential
+
+> VerifiableCredentialResponse CreateVerifiableCredential(ctx).CreateVerifiableCredentialRequestBody(createVerifiableCredentialRequestBody).Execute()
+
+Issues a Verifiable Credential
+
+
+
+### Example
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/ory/hydra-client-go/v2"
+)
+
+func main() {
+	createVerifiableCredentialRequestBody := *openapiclient.NewCreateVerifiableCredentialRequestBody() // CreateVerifiableCredentialRequestBody |  (optional)
+
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	resp, r, err := apiClient.OidcApi.CreateVerifiableCredential(context.Background()).CreateVerifiableCredentialRequestBody(createVerifiableCredentialRequestBody).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.CreateVerifiableCredential``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+	// response from `CreateVerifiableCredential`: VerifiableCredentialResponse
+	fmt.Fprintf(os.Stdout, "Response from `OidcApi.CreateVerifiableCredential`: %v\n", resp)
+}
+```
+
+### Path Parameters
+
+
+
+### Other Parameters
+
+Other parameters are passed through a pointer to a apiCreateVerifiableCredentialRequest struct via the builder pattern
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **createVerifiableCredentialRequestBody** | [**CreateVerifiableCredentialRequestBody**](CreateVerifiableCredentialRequestBody.md) |  | 
+
+### Return type
+
+[**VerifiableCredentialResponse**](VerifiableCredentialResponse.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+- **Content-Type**: application/json
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints)
+[[Back to Model list]](../README.md#documentation-for-models)
+[[Back to README]](../README.md)
+
+
 ## DeleteOidcDynamicClient
 
 > DeleteOidcDynamicClient(ctx, id).Execute()
@@ -94,22 +161,22 @@ Delete OAuth 2.0 Client using the OpenID Dynamic Client Registration Management 
 package main
 
 import (
-    "context"
-    "fmt"
-    "os"
-    openapiclient "./openapi"
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/ory/hydra-client-go/v2"
 )
 
 func main() {
-    id := "id_example" // string | The id of the OAuth 2.0 Client.
+	id := "id_example" // string | The id of the OAuth 2.0 Client.
 
-    configuration := openapiclient.NewConfiguration()
-    apiClient := openapiclient.NewAPIClient(configuration)
-    resp, r, err := apiClient.OidcApi.DeleteOidcDynamicClient(context.Background(), id).Execute()
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.DeleteOidcDynamicClient``: %v\n", err)
-        fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
-    }
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	r, err := apiClient.OidcApi.DeleteOidcDynamicClient(context.Background(), id).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.DeleteOidcDynamicClient``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
 }
 ```
 
@@ -162,23 +229,23 @@ OpenID Connect Discovery
 package main
 
 import (
-    "context"
-    "fmt"
-    "os"
-    openapiclient "./openapi"
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/ory/hydra-client-go/v2"
 )
 
 func main() {
 
-    configuration := openapiclient.NewConfiguration()
-    apiClient := openapiclient.NewAPIClient(configuration)
-    resp, r, err := apiClient.OidcApi.DiscoverOidcConfiguration(context.Background()).Execute()
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.DiscoverOidcConfiguration``: %v\n", err)
-        fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
-    }
-    // response from `DiscoverOidcConfiguration`: OidcConfiguration
-    fmt.Fprintf(os.Stdout, "Response from `OidcApi.DiscoverOidcConfiguration`: %v\n", resp)
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	resp, r, err := apiClient.OidcApi.DiscoverOidcConfiguration(context.Background()).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.DiscoverOidcConfiguration``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+	// response from `DiscoverOidcConfiguration`: OidcConfiguration
+	fmt.Fprintf(os.Stdout, "Response from `OidcApi.DiscoverOidcConfiguration`: %v\n", resp)
 }
 ```
 
@@ -223,24 +290,24 @@ Get OAuth2 Client using OpenID Dynamic Client Registration
 package main
 
 import (
-    "context"
-    "fmt"
-    "os"
-    openapiclient "./openapi"
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/ory/hydra-client-go/v2"
 )
 
 func main() {
-    id := "id_example" // string | The id of the OAuth 2.0 Client.
+	id := "id_example" // string | The id of the OAuth 2.0 Client.
 
-    configuration := openapiclient.NewConfiguration()
-    apiClient := openapiclient.NewAPIClient(configuration)
-    resp, r, err := apiClient.OidcApi.GetOidcDynamicClient(context.Background(), id).Execute()
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.GetOidcDynamicClient``: %v\n", err)
-        fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
-    }
-    // response from `GetOidcDynamicClient`: OAuth2Client
-    fmt.Fprintf(os.Stdout, "Response from `OidcApi.GetOidcDynamicClient`: %v\n", resp)
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	resp, r, err := apiClient.OidcApi.GetOidcDynamicClient(context.Background(), id).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.GetOidcDynamicClient``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+	// response from `GetOidcDynamicClient`: OAuth2Client
+	fmt.Fprintf(os.Stdout, "Response from `OidcApi.GetOidcDynamicClient`: %v\n", resp)
 }
 ```
 
@@ -293,23 +360,23 @@ OpenID Connect Userinfo
 package main
 
 import (
-    "context"
-    "fmt"
-    "os"
-    openapiclient "./openapi"
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/ory/hydra-client-go/v2"
 )
 
 func main() {
 
-    configuration := openapiclient.NewConfiguration()
-    apiClient := openapiclient.NewAPIClient(configuration)
-    resp, r, err := apiClient.OidcApi.GetOidcUserInfo(context.Background()).Execute()
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.GetOidcUserInfo``: %v\n", err)
-        fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
-    }
-    // response from `GetOidcUserInfo`: OidcUserInfo
-    fmt.Fprintf(os.Stdout, "Response from `OidcApi.GetOidcUserInfo`: %v\n", resp)
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	resp, r, err := apiClient.OidcApi.GetOidcUserInfo(context.Background()).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.GetOidcUserInfo``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+	// response from `GetOidcUserInfo`: OidcUserInfo
+	fmt.Fprintf(os.Stdout, "Response from `OidcApi.GetOidcUserInfo`: %v\n", resp)
 }
 ```
 
@@ -354,21 +421,21 @@ OpenID Connect Front- and Back-channel Enabled Logout
 package main
 
 import (
-    "context"
-    "fmt"
-    "os"
-    openapiclient "./openapi"
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/ory/hydra-client-go/v2"
 )
 
 func main() {
 
-    configuration := openapiclient.NewConfiguration()
-    apiClient := openapiclient.NewAPIClient(configuration)
-    resp, r, err := apiClient.OidcApi.RevokeOidcSession(context.Background()).Execute()
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.RevokeOidcSession``: %v\n", err)
-        fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
-    }
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	r, err := apiClient.OidcApi.RevokeOidcSession(context.Background()).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.RevokeOidcSession``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
 }
 ```
 
@@ -413,25 +480,25 @@ Set OAuth2 Client using OpenID Dynamic Client Registration
 package main
 
 import (
-    "context"
-    "fmt"
-    "os"
-    openapiclient "./openapi"
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/ory/hydra-client-go/v2"
 )
 
 func main() {
-    id := "id_example" // string | OAuth 2.0 Client ID
-    oAuth2Client := *openapiclient.NewOAuth2Client() // OAuth2Client | OAuth 2.0 Client Request Body
+	id := "id_example" // string | OAuth 2.0 Client ID
+	oAuth2Client := *openapiclient.NewOAuth2Client() // OAuth2Client | OAuth 2.0 Client Request Body
 
-    configuration := openapiclient.NewConfiguration()
-    apiClient := openapiclient.NewAPIClient(configuration)
-    resp, r, err := apiClient.OidcApi.SetOidcDynamicClient(context.Background(), id).OAuth2Client(oAuth2Client).Execute()
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.SetOidcDynamicClient``: %v\n", err)
-        fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
-    }
-    // response from `SetOidcDynamicClient`: OAuth2Client
-    fmt.Fprintf(os.Stdout, "Response from `OidcApi.SetOidcDynamicClient`: %v\n", resp)
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	resp, r, err := apiClient.OidcApi.SetOidcDynamicClient(context.Background(), id).OAuth2Client(oAuth2Client).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `OidcApi.SetOidcDynamicClient``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+	// response from `SetOidcDynamicClient`: OAuth2Client
+	fmt.Fprintf(os.Stdout, "Response from `OidcApi.SetOidcDynamicClient`: %v\n", resp)
 }
 ```
 

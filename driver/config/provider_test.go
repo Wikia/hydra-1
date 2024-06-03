@@ -5,15 +5,16 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ory/fosite/token/jwt"
 	"github.com/ory/x/configx"
 	"github.com/ory/x/otelx"
 
@@ -305,6 +306,7 @@ func TestViperProviderValidates(t *testing.T) {
 	assert.False(t, c.GetScopeStrategy(ctx)([]string{"openid.*"}, "openid.email"), "should us fosite.ExactScopeStrategy")
 	assert.Equal(t, AccessTokenDefaultStrategy, c.AccessTokenStrategy(ctx))
 	assert.Equal(t, false, c.GrantAllClientCredentialsScopesPerDefault(ctx))
+	assert.Equal(t, jwt.JWTScopeFieldList, c.GetJWTScopeField(ctx))
 
 	// ttl
 	assert.Equal(t, 2*time.Hour, c.ConsentRequestMaxAge(ctx))
@@ -423,17 +425,44 @@ func TestCookieSecure(t *testing.T) {
 	assert.True(t, c.CookieSecure(ctx))
 }
 
-func TestTokenRefreshHookURL(t *testing.T) {
+func TestHookConfigs(t *testing.T) {
 	ctx := context.Background()
 	l := logrusx.New("", "")
 	l.Logrus().SetOutput(io.Discard)
 	c := MustNew(context.Background(), l, configx.SkipValidation())
 
-	assert.EqualValues(t, (*url.URL)(nil), c.TokenRefreshHookURL(ctx))
-	c.MustSet(ctx, KeyRefreshTokenHookURL, "")
-	assert.EqualValues(t, (*url.URL)(nil), c.TokenRefreshHookURL(ctx))
-	c.MustSet(ctx, KeyRefreshTokenHookURL, "http://localhost:8080/oauth/token_refresh")
-	assert.EqualValues(t, "http://localhost:8080/oauth/token_refresh", c.TokenRefreshHookURL(ctx).String())
+	for key, getFunc := range map[string]func(context.Context) *HookConfig{
+		KeyRefreshTokenHook: c.TokenRefreshHookConfig,
+		KeyTokenHook:        c.TokenHookConfig,
+	} {
+		assert.Nil(t, getFunc(ctx))
+		c.MustSet(ctx, key, "")
+		assert.Nil(t, getFunc(ctx))
+		c.MustSet(ctx, key, "http://localhost:8080/hook")
+		hc := getFunc(ctx)
+		require.NotNil(t, hc)
+		assert.EqualValues(t, "http://localhost:8080/hook", hc.URL)
+
+		c.MustSet(ctx, key, `
+{
+	"url": "http://localhost:8080/hook2",
+	"auth": {
+		"type": "api_key",
+		"config": {
+			"in": "header",
+			"name": "my-header",
+			"value": "my-value"
+		}
+	}
+}`)
+		hc = getFunc(ctx)
+		require.NotNil(t, hc)
+		assert.EqualValues(t, "http://localhost:8080/hook2", hc.URL)
+		assert.EqualValues(t, "api_key", hc.Auth.Type)
+		rawConfig, err := json.Marshal(hc.Auth.Config)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"in":"header","name":"my-header","value":"my-value"}`, string(rawConfig))
+	}
 }
 
 func TestJWTBearer(t *testing.T) {
@@ -463,4 +492,20 @@ func TestJWTBearer(t *testing.T) {
 	assert.Equal(t, 24.0, p2.GetJWTMaxDuration(ctx).Hours())
 	assert.Equal(t, true, p2.GetGrantTypeJWTBearerIssuedDateOptional(ctx))
 	assert.Equal(t, true, p2.GetGrantTypeJWTBearerIDOptional(ctx))
+}
+
+func TestJWTScopeClaimStrategy(t *testing.T) {
+	l := logrusx.New("", "")
+	l.Logrus().SetOutput(io.Discard)
+	p := MustNew(context.Background(), l)
+
+	ctx := context.Background()
+
+	assert.Equal(t, jwt.JWTScopeFieldList, p.GetJWTScopeField(ctx))
+	p.MustSet(ctx, KeyJWTScopeClaimStrategy, "list")
+	assert.Equal(t, jwt.JWTScopeFieldList, p.GetJWTScopeField(ctx))
+	p.MustSet(ctx, KeyJWTScopeClaimStrategy, "string")
+	assert.Equal(t, jwt.JWTScopeFieldString, p.GetJWTScopeField(ctx))
+	p.MustSet(ctx, KeyJWTScopeClaimStrategy, "both")
+	assert.Equal(t, jwt.JWTScopeFieldBoth, p.GetJWTScopeField(ctx))
 }

@@ -10,13 +10,13 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/hashicorp/go-retryablehttp"
+
 	"github.com/ory/herodot"
 	"github.com/ory/hydra/v2/driver/config"
 	"github.com/ory/hydra/v2/x"
-	"github.com/ory/x/ipx"
-
 	"github.com/ory/x/errorsx"
-
+	"github.com/ory/x/ipx"
 	"github.com/ory/x/stringslice"
 )
 
@@ -63,6 +63,14 @@ func (v *Validator) Validate(ctx context.Context, c *Client) error {
 
 	if len(c.JSONWebKeysURI) > 0 && c.JSONWebKeys != nil {
 		return errorsx.WithStack(ErrInvalidClientMetadata.WithHint("Fields jwks and jwks_uri can not both be set, you must choose one."))
+	}
+
+	if c.JSONWebKeys != nil && c.JSONWebKeys.JSONWebKeySet != nil {
+		for _, k := range c.JSONWebKeys.Keys {
+			if !k.Valid() {
+				return errorsx.WithStack(ErrInvalidClientMetadata.WithHint("Invalid JSON web key in set."))
+			}
+		}
 	}
 
 	if v.r.Config().ClientHTTPNoPrivateIPRanges() {
@@ -199,6 +207,9 @@ func (v *Validator) ValidateDynamicRegistration(ctx context.Context, c *Client) 
 	if c.SkipConsent {
 		return errorsx.WithStack(ErrInvalidRequest.WithDescription(`"skip_consent" cannot be set for dynamic client registration`))
 	}
+	if c.SkipLogoutConsent.Bool {
+		return errorsx.WithStack(ErrInvalidRequest.WithDescription(`"skip_logout_consent" cannot be set for dynamic client registration`))
+	}
 
 	return v.Validate(ctx, c)
 }
@@ -213,7 +224,11 @@ func (v *Validator) ValidateSectorIdentifierURL(ctx context.Context, location st
 		return errorsx.WithStack(ErrInvalidClientMetadata.WithDebug("Value sector_identifier_uri must be an HTTPS URL but it is not."))
 	}
 
-	response, err := v.r.HTTPClient(ctx).Get(location)
+	req, err := retryablehttp.NewRequestWithContext(ctx, "GET", location, nil)
+	if err != nil {
+		return errorsx.WithStack(ErrInvalidClientMetadata.WithDebugf("Value sector_identifier_uri must be an HTTPS URL but it is not: %s", err.Error()))
+	}
+	response, err := v.r.HTTPClient(ctx).Do(req)
 	if err != nil {
 		return errorsx.WithStack(ErrInvalidClientMetadata.WithDebug(fmt.Sprintf("Unable to connect to URL set by sector_identifier_uri: %s", err)))
 	}
